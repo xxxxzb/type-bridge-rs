@@ -5,6 +5,26 @@ mod server;
 mod tray;
 
 use clap::Parser;
+use std::cell::RefCell;
+use std::rc::Rc;
+use std::sync::Arc;
+use tokio::sync::oneshot;
+use tray_icon::menu::MenuEvent;
+use winit::event::Event;
+use winit::event_loop::EventLoopBuilder;
+use winit::event_loop::EventLoopProxy;
+
+#[derive(Debug)]
+enum TrayEvent {
+    Menu(muda::MenuId),
+}
+
+/// On macOS, `EventLoopProxy` is not `Sync` because it holds a `*mut CFRunLoopSource`.
+/// MenuEvent::set_event_handler requires `Fn + Send + Sync + 'static`.
+/// Since both the menu event handler and the event loop execute on the main thread,
+/// it is safe to mark the proxy as `Sync`.
+struct SyncProxy(EventLoopProxy<TrayEvent>);
+unsafe impl Sync for SyncProxy {}
 
 #[derive(Parser)]
 #[command(name = "type-bridge-rs", version, about = "Wi-Fi remote keyboard — type on your PC from your phone browser")]
@@ -24,18 +44,60 @@ fn main() {
     println!("📱 Open on your phone: http://{}:{}", ip, port);
     print_qr(&format!("http://{}:{}", ip, port));
 
-    let (shutdown_tx, shutdown_rx) = tokio::sync::oneshot::channel::<()>();
+    let (shutdown_tx, shutdown_rx) = oneshot::channel::<()>();
+    let shutdown_tx = std::cell::Cell::new(Some(shutdown_tx));
 
-    // Server thread with its own tokio runtime (separate from main thread for macOS tray)
     std::thread::spawn(move || {
         let rt = tokio::runtime::Runtime::new().expect("Failed to create tokio runtime");
         rt.block_on(async { server::run(port, shutdown_rx).await });
     });
 
-    // Tray on main thread (required for macOS). Blocks until Quit.
-    tray::run_tray(&ip, port, shutdown_tx);
+    let event_loop = EventLoopBuilder::<TrayEvent>::with_user_event()
+        .build()
+        .expect("Failed to create event loop");
+    let proxy = Arc::new(SyncProxy(event_loop.create_proxy()));
 
-    // Give the server thread a moment to clean up
+    let tray_state = Rc::new(RefCell::new(tray::build_tray(&ip, port)));
+    let toggle_id = tray_state.borrow().toggle_id.clone();
+    let quit_id = tray_state.borrow().quit_id.clone();
+
+    let proxy2 = proxy.clone();
+    MenuEvent::set_event_handler(Some(move |event: tray_icon::menu::MenuEvent| {
+        let _ = proxy2.0.send_event(TrayEvent::Menu(event.id));
+    }));
+
+    event_loop.run(move |event, elwt| {
+        elwt.set_control_flow(winit::event_loop::ControlFlow::Wait);
+
+        if let Event::UserEvent(TrayEvent::Menu(id)) = event {
+            if id == toggle_id {
+                let enabled = crate::keyboard::is_enabled();
+                crate::keyboard::set_enabled(!enabled);
+                let new_state = crate::keyboard::is_enabled();
+                let status = if new_state { "ON" } else { "PAUSED" };
+                let state = tray_state.borrow_mut();
+                state
+                    .tray
+                    .set_icon(Some(crate::tray::make_icon(new_state)))
+                    .unwrap_or_else(|e| tracing::error!("Failed to update tray icon: {e}"));
+                state
+                    .tray
+                    .set_tooltip(Some(format!(
+                        "TypeBridge — {}\nhttp://{}:{}",
+                        status, ip, port
+                    )))
+                    .unwrap_or_else(|e| tracing::error!("Failed to update tray tooltip: {e}"));
+            } else if id == quit_id {
+                tracing::info!("Shutting down...");
+                if let Some(tx) = shutdown_tx.take() {
+                    let _ = tx.send(());
+                }
+                elwt.exit();
+            }
+        }
+    })
+    .expect("Event loop error");
+
     std::thread::sleep(std::time::Duration::from_millis(300));
 }
 

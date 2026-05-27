@@ -1,7 +1,13 @@
-use muda::{Menu, MenuEvent, MenuItem, PredefinedMenuItem};
-use tokio::sync::oneshot;
+use muda::{Menu, MenuItem, PredefinedMenuItem};
 use tray_icon::Icon;
+use tray_icon::TrayIcon;
 use tray_icon::TrayIconBuilder;
+
+pub struct TrayState {
+    pub tray: TrayIcon,
+    pub toggle_id: muda::MenuId,
+    pub quit_id: muda::MenuId,
+}
 
 fn make_icon_rgba(color: [u8; 4]) -> Vec<u8> {
     let size = 32u32;
@@ -61,7 +67,7 @@ fn make_icon_rgba(color: [u8; 4]) -> Vec<u8> {
     pixels
 }
 
-fn make_icon(active: bool) -> Icon {
+pub fn make_icon(active: bool) -> Icon {
     let color = if active {
         [0, 220, 100, 255]
     } else {
@@ -71,7 +77,7 @@ fn make_icon(active: bool) -> Icon {
     Icon::from_rgba(rgba, 32, 32).expect("Failed to create tray icon from RGBA data")
 }
 
-pub fn run_tray(ip: &str, port: u16, shutdown_tx: oneshot::Sender<()>) {
+pub fn build_tray(ip: &str, port: u16) -> TrayState {
     let menu = Menu::new();
     let info = MenuItem::new(format!("Open: http://{}:{}", ip, port), false, None);
     let toggle = MenuItem::new("Toggle Typing", true, None);
@@ -96,33 +102,9 @@ pub fn run_tray(ip: &str, port: u16, shutdown_tx: oneshot::Sender<()>) {
         .build()
         .expect("Failed to create system tray icon");
 
-    let receiver = MenuEvent::receiver();
-
-    loop {
-        match receiver.recv() {
-            Ok(event) if event.id == toggle_id => {
-                let currently_enabled = crate::keyboard::is_enabled();
-                crate::keyboard::set_enabled(!currently_enabled);
-                let new_state = crate::keyboard::is_enabled();
-                let status = if new_state { "ON" } else { "PAUSED" };
-                tray.set_icon(Some(make_icon(new_state)))
-                    .unwrap_or_else(|e| tracing::error!("Failed to update tray icon: {e}"));
-                tray.set_tooltip(Some(format!(
-                    "TypeBridge — {}\nhttp://{}:{}",
-                    status, ip, port
-                )))
-                .unwrap_or_else(|e| tracing::error!("Failed to update tray tooltip: {e}"));
-            }
-            Ok(event) if event.id == quit_id => {
-                tracing::info!("Shutting down...");
-                let _ = shutdown_tx.send(());
-                break;
-            }
-            Ok(_) => {}
-            Err(_) => {
-                // Channel closed, exit
-                break;
-            }
-        }
+    TrayState {
+        tray,
+        toggle_id,
+        quit_id,
     }
 }
