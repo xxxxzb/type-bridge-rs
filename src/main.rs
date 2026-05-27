@@ -3,6 +3,7 @@ mod ip;
 mod keyboard;
 mod server;
 mod tray;
+mod tray_icons;
 
 use clap::Parser;
 use std::cell::RefCell;
@@ -142,6 +143,7 @@ fn main() {
                         .unwrap_or_else(|e| tracing::error!("Tray icon: {e}"));
                     state.tray.set_tooltip(Some(format!("TypeBridge — {}\n{}", status, url_clone)))
                         .unwrap_or_else(|e| tracing::error!("Tooltip: {e}"));
+                    state.status_item.set_text(format!("Typing: {status}"));
                 } else if id == copy_url_id {
                     copy_to_clipboard(&url_clone);
                 } else if id == quit_id {
