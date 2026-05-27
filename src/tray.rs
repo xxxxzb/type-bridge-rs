@@ -6,6 +6,7 @@ use tray_icon::TrayIconBuilder;
 pub struct TrayState {
     pub tray: TrayIcon,
     pub toggle_id: muda::MenuId,
+    pub copy_url_id: muda::MenuId,
     pub quit_id: muda::MenuId,
 }
 
@@ -67,6 +68,20 @@ fn make_icon_rgba(color: [u8; 4]) -> Vec<u8> {
     pixels
 }
 
+fn qr_lines(url: &str) -> Vec<String> {
+    use qrcode::QrCode;
+    use qrcode::render::unicode;
+
+    let code = QrCode::new(url).expect("Failed to generate QR code");
+    let text = code
+        .render::<unicode::Dense1x2>()
+        .dark_color(unicode::Dense1x2::Dark)
+        .light_color(unicode::Dense1x2::Light)
+        .build();
+
+    text.lines().map(|l| l.to_string()).collect()
+}
+
 pub fn make_icon(active: bool) -> Icon {
     let color = if active {
         [0, 220, 100, 255]
@@ -79,20 +94,44 @@ pub fn make_icon(active: bool) -> Icon {
 
 pub fn build_tray(ip: &str, port: u16) -> TrayState {
     let menu = Menu::new();
-    let info = MenuItem::new(format!("Open: http://{}:{}", ip, port), false, None);
+
+    // URL display (disabled)
+    let url_item = MenuItem::new(format!("http://{}:{}", ip, port), false, None);
+    menu.append(&url_item)
+        .unwrap_or_else(|e| tracing::error!("Failed to add URL item: {e}"));
+
+    menu.append(&PredefinedMenuItem::separator())
+        .unwrap_or_else(|e| tracing::error!("Failed to add separator: {e}"));
+
+    // QR code rows (disabled, for display only)
+    let url = format!("http://{}:{}", ip, port);
+    let qr_items: Vec<MenuItem> = qr_lines(&url)
+        .into_iter()
+        .map(|line| MenuItem::new(line, false, None))
+        .collect();
+
+    for item in &qr_items {
+        menu.append(item)
+            .unwrap_or_else(|e| tracing::error!("Failed to add QR row: {e}"));
+    }
+
+    menu.append(&PredefinedMenuItem::separator())
+        .unwrap_or_else(|e| tracing::error!("Failed to add separator: {e}"));
+
+    // Action items
+    let copy_url = MenuItem::new("Copy URL", true, None);
     let toggle = MenuItem::new("Toggle Typing", true, None);
     let quit = MenuItem::new("Quit", true, None);
 
-    menu.append(&info)
-        .unwrap_or_else(|e| tracing::error!("Failed to add tray menu item: {e}"));
-    menu.append(&PredefinedMenuItem::separator())
-        .unwrap_or_else(|e| tracing::error!("Failed to add tray separator: {e}"));
+    menu.append(&copy_url)
+        .unwrap_or_else(|e| tracing::error!("Failed to add Copy URL: {e}"));
     menu.append(&toggle)
-        .unwrap_or_else(|e| tracing::error!("Failed to add toggle menu item: {e}"));
+        .unwrap_or_else(|e| tracing::error!("Failed to add Toggle: {e}"));
     menu.append(&quit)
-        .unwrap_or_else(|e| tracing::error!("Failed to add quit menu item: {e}"));
+        .unwrap_or_else(|e| tracing::error!("Failed to add Quit: {e}"));
 
     let toggle_id = toggle.id().clone();
+    let copy_url_id = copy_url.id().clone();
     let quit_id = quit.id().clone();
 
     let tray = TrayIconBuilder::new()
@@ -105,6 +144,7 @@ pub fn build_tray(ip: &str, port: u16) -> TrayState {
     TrayState {
         tray,
         toggle_id,
+        copy_url_id,
         quit_id,
     }
 }

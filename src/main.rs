@@ -37,15 +37,15 @@ fn main() {
     let cli = Cli::parse();
     let ip = ip::get_local_ip();
     let port = cli.port;
+    let url = format!("http://{}:{}", ip, port);
 
     println!("\n⌨️  TypeBridge running!");
-    println!("📱 Open on your phone: http://{}:{}", ip, port);
-    print_qr(&format!("http://{}:{}", ip, port));
+    println!("📱 Open on your phone: {url}");
+    print_qr(&url);
 
     let (shutdown_tx, shutdown_rx) = oneshot::channel::<()>();
     let shutdown_tx = std::cell::Cell::new(Some(shutdown_tx));
 
-    // Channel for keyboard commands: server thread → main thread
     let (kb_tx, kb_rx) = mpsc::channel::<keyboard::KeyCommand>();
     keyboard::init_command_queue(kb_tx);
 
@@ -61,6 +61,7 @@ fn main() {
 
     let tray_state = Rc::new(RefCell::new(tray::build_tray(&ip, port)));
     let toggle_id = tray_state.borrow().toggle_id.clone();
+    let copy_url_id = tray_state.borrow().copy_url_id.clone();
     let quit_id = tray_state.borrow().quit_id.clone();
 
     let proxy2 = proxy.clone();
@@ -68,13 +69,13 @@ fn main() {
         let _ = proxy2.0.send_event(TrayEvent::Menu(event.id));
     }));
 
+    let url_clone = url.clone();
+
     event_loop.run(move |event, elwt| {
-        // Wake every 100ms to check for keyboard commands; negligible CPU impact
         elwt.set_control_flow(winit::event_loop::ControlFlow::WaitUntil(
             Instant::now() + Duration::from_millis(100),
         ));
 
-        // Drain keyboard commands (execute on main thread for macOS CGEvent safety)
         while let Ok(cmd) = kb_rx.try_recv() {
             keyboard::execute(cmd);
         }
@@ -93,10 +94,12 @@ fn main() {
                 state
                     .tray
                     .set_tooltip(Some(format!(
-                        "TypeBridge — {}\nhttp://{}:{}",
-                        status, ip, port
+                        "TypeBridge — {}\n{}",
+                        status, url_clone
                     )))
                     .unwrap_or_else(|e| tracing::error!("Failed to update tray tooltip: {e}"));
+            } else if id == copy_url_id {
+                copy_to_clipboard(&url_clone);
             } else if id == quit_id {
                 tracing::info!("Shutting down...");
                 if let Some(tx) = shutdown_tx.take() {
@@ -122,4 +125,15 @@ fn print_qr(url: &str) {
         .light_color(unicode::Dense1x2::Light)
         .build();
     println!("{image}");
+}
+
+fn copy_to_clipboard(url: &str) {
+    match arboard::Clipboard::new() {
+        Ok(mut c) => {
+            if let Err(e) = c.set_text(url) {
+                tracing::error!("Failed to copy to clipboard: {e}");
+            }
+        }
+        Err(e) => tracing::error!("Failed to open clipboard: {e}"),
+    }
 }
