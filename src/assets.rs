@@ -1,54 +1,4 @@
 pub const HTML: &str = r#"<!DOCTYPE html>
-
-#[cfg(test)]
-mod tests {
-    use super::*;
-
-    #[test]
-    fn test_html_has_doctype() {
-        assert!(HTML.starts_with("<!DOCTYPE html>"));
-    }
-
-    #[test]
-    fn test_html_contains_textarea() {
-        assert!(HTML.contains("<textarea"));
-    }
-
-    #[test]
-    fn test_html_contains_socket_io() {
-        assert!(HTML.contains("socket.io"));
-    }
-
-    #[test]
-    fn test_html_contains_send_button() {
-        assert!(HTML.contains("send to PC"));
-    }
-
-    #[test]
-    fn test_html_contains_backspace_button() {
-        assert!(HTML.contains("backspace"));
-    }
-
-    #[test]
-    fn test_html_contains_enter_button() {
-        assert!(HTML.contains("enter"));
-    }
-
-    #[test]
-    fn test_html_contains_clear_button() {
-        assert!(HTML.contains("clear"));
-    }
-
-    #[test]
-    fn test_html_contains_type_text_event() {
-        assert!(HTML.contains("type_text"));
-    }
-
-    #[test]
-    fn test_html_closes_properly() {
-        assert!(HTML.ends_with("</html>"));
-    }
-}
 <html lang="en">
 <head>
 <meta charset="UTF-8">
@@ -362,3 +312,53 @@ enterBtn.addEventListener('click', () => {
 </script>
 </body>
 </html>"#;
+
+#[cfg(test)]
+mod tests {
+    use super::*;
+
+    #[test]
+    fn test_html_has_doctype() {
+        assert!(HTML.starts_with("<!DOCTYPE html>"));
+    }
+
+    #[test]
+    fn test_html_contains_textarea() {
+        assert!(HTML.contains("<textarea"));
+    }
+
+    #[test]
+    fn test_html_contains_socket_io() {
+        assert!(HTML.contains("socket.io"));
+    }
+
+    #[test]
+    fn test_html_contains_send_button() {
+        assert!(HTML.contains("send to PC"));
+    }
+
+    #[test]
+    fn test_html_contains_backspace_button() {
+        assert!(HTML.contains("backspace"));
+    }
+
+    #[test]
+    fn test_html_contains_enter_button() {
+        assert!(HTML.contains("enter"));
+    }
+
+    #[test]
+    fn test_html_contains_clear_button() {
+        assert!(HTML.contains("clear"));
+    }
+
+    #[test]
+    fn test_html_contains_type_text_event() {
+        assert!(HTML.contains("type_text"));
+    }
+
+    #[test]
+    fn test_html_closes_properly() {
+        assert!(HTML.ends_with("</html>"));
+    }
+}
