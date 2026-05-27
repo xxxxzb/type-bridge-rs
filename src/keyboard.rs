@@ -145,7 +145,7 @@ mod tests {
 
     #[test]
     fn test_enabled_default() {
-        set_enabled(true);
+        ENABLED.store(true, Ordering::SeqCst);
         assert!(is_enabled());
     }
 

@@ -1,5 +1,11 @@
 # TypeBridge ⌨️
 
+<p align="center">
+  <img src="https://img.shields.io/badge/Rust-1.75%2B-orange?style=flat-square&logo=rust" alt="Rust 1.75+">
+  <img src="https://img.shields.io/github/license/xxxxzb/type-bridge-rs?style=flat-square&color=blue" alt="License MIT">
+  <img src="https://img.shields.io/badge/platform-macOS%20%7C%20Windows%20%7C%20Linux-lightgrey?style=flat-square" alt="Platform">
+</p>
+
 > 用手机浏览器通过 Wi-Fi 在电脑上打字。无需安装 App，无需蓝牙 — 打开网页就能打。支持任何手机输入法，包括语音输入。
 
 一个自托管的远程键盘，把手机浏览器变成 PC 的无线键盘。完全在局域网内运行 — 无需账号、无需云端、手机端零安装。
