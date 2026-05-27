@@ -1,9 +1,20 @@
 use arboard::Clipboard;
 use enigo::{Direction, Enigo, Key, Keyboard, Settings};
 use std::sync::atomic::{AtomicBool, Ordering};
+use std::sync::{Mutex, OnceLock};
 use std::time::Duration;
 
 static ENABLED: AtomicBool = AtomicBool::new(true);
+static ENIGO: OnceLock<Mutex<Enigo>> = OnceLock::new();
+
+fn enigo() -> std::sync::MutexGuard<'static, Enigo> {
+    ENIGO
+        .get_or_init(|| {
+            Mutex::new(Enigo::new(&Settings::default()).expect("Failed to initialize enigo"))
+        })
+        .lock()
+        .expect("enigo mutex poisoned")
+}
 
 pub fn set_enabled(v: bool) {
     ENABLED.store(v, Ordering::SeqCst);
@@ -26,7 +37,6 @@ pub fn type_text(text: &str) {
         }
     };
 
-    // Save previous clipboard content to restore after paste
     let previous = clipboard.get_text().ok();
 
     if let Err(e) = clipboard.set_text(text) {
@@ -36,17 +46,7 @@ pub fn type_text(text: &str) {
 
     std::thread::sleep(Duration::from_millis(30));
 
-    let mut enigo = match Enigo::new(&Settings::default()) {
-        Ok(e) => e,
-        Err(e) => {
-            tracing::error!("Failed to init enigo: {e}");
-            // Restore clipboard before returning
-            if let Some(prev) = previous {
-                let _ = clipboard.set_text(&prev);
-            }
-            return;
-        }
-    };
+    let mut enigo = enigo();
 
     #[cfg(target_os = "macos")]
     let mod_key = Key::Meta;
@@ -65,7 +65,6 @@ pub fn type_text(text: &str) {
 
     std::thread::sleep(Duration::from_millis(50));
 
-    // Restore previous clipboard content
     if let Some(prev) = previous {
         if let Err(e) = clipboard.set_text(&prev) {
             tracing::warn!("Failed to restore clipboard: {e}");
@@ -77,13 +76,7 @@ pub fn press_backspace() {
     if !is_enabled() {
         return;
     }
-    let mut enigo = match Enigo::new(&Settings::default()) {
-        Ok(e) => e,
-        Err(e) => {
-            tracing::error!("Failed to init enigo for backspace: {e}");
-            return;
-        }
-    };
+    let mut enigo = enigo();
     if let Err(e) = enigo.key(Key::Backspace, Direction::Click) {
         tracing::error!("Backspace keystroke failed: {e}");
     }
@@ -93,13 +86,7 @@ pub fn press_enter() {
     if !is_enabled() {
         return;
     }
-    let mut enigo = match Enigo::new(&Settings::default()) {
-        Ok(e) => e,
-        Err(e) => {
-            tracing::error!("Failed to init enigo for enter: {e}");
-            return;
-        }
-    };
+    let mut enigo = enigo();
     if let Err(e) = enigo.key(Key::Return, Direction::Click) {
         tracing::error!("Enter keystroke failed: {e}");
     }
