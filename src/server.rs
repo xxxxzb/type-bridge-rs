@@ -15,7 +15,7 @@ struct PressKeyPayload {
     key: String,
 }
 
-pub async fn run(port: u16, shutdown_rx: oneshot::Receiver<()>) {
+fn build_router() -> (Router, SocketIo) {
     let (layer, io) = SocketIo::new_layer();
 
     io.ns("/", |socket: SocketRef| {
@@ -25,17 +25,17 @@ pub async fn run(port: u16, shutdown_rx: oneshot::Receiver<()>) {
         socket.on(
             "type_text",
             |_: SocketRef, Data(payload): Data<TypeTextPayload>| async move {
-                crate::keyboard::type_text(&payload.text);
+                crate::keyboard::queue_type_text(payload.text);
             },
         );
         socket.on("backspace", |_: SocketRef, Data(()): Data<()>| async move {
-            crate::keyboard::press_backspace();
+            crate::keyboard::queue_backspace();
         });
         socket.on(
             "press_key",
             |_: SocketRef, Data(payload): Data<PressKeyPayload>| async move {
                 match payload.key.as_str() {
-                    "enter" => crate::keyboard::press_enter(),
+                    "enter" => crate::keyboard::queue_enter(),
                     other => tracing::warn!("Unknown key requested: {other}"),
                 }
             },
@@ -49,6 +49,12 @@ pub async fn run(port: u16, shutdown_rx: oneshot::Receiver<()>) {
     let app = Router::new()
         .route("/", get(|| async { Html(HTML) }))
         .layer(layer);
+
+    (app, io)
+}
+
+pub async fn run(port: u16, shutdown_rx: oneshot::Receiver<()>) {
+    let (app, _io) = build_router();
 
     let addr = std::net::SocketAddr::from(([0, 0, 0, 0], port));
     tracing::info!("Server listening on http://0.0.0.0:{}", port);
@@ -64,4 +70,58 @@ pub async fn run(port: u16, shutdown_rx: oneshot::Receiver<()>) {
         })
         .await
         .expect("Server crashed unexpectedly");
+}
+
+#[cfg(test)]
+mod tests {
+    use super::*;
+    use axum::body::Body;
+    use axum::http::Request;
+    use tower::ServiceExt;
+
+    #[tokio::test]
+    async fn test_index_returns_html() {
+        let (app, _io) = build_router();
+        let response = app
+            .oneshot(Request::builder().uri("/").body(Body::empty()).unwrap())
+            .await
+            .unwrap();
+
+        assert_eq!(response.status(), 200);
+        let body = axum::body::to_bytes(response.into_body(), 1024 * 1024)
+            .await
+            .unwrap();
+        let body_str = String::from_utf8(body.to_vec()).unwrap();
+        assert!(body_str.contains("<!DOCTYPE html>"));
+        assert!(body_str.contains("TypeBridge"));
+        assert!(body_str.contains("textarea"));
+    }
+
+    #[tokio::test]
+    async fn test_index_content_type_html() {
+        let (app, _io) = build_router();
+        let response = app
+            .oneshot(Request::builder().uri("/").body(Body::empty()).unwrap())
+            .await
+            .unwrap();
+
+        let content_type = response
+            .headers()
+            .get("content-type")
+            .unwrap()
+            .to_str()
+            .unwrap();
+        assert!(content_type.contains("text/html"));
+    }
+
+    #[tokio::test]
+    async fn test_404_on_unknown_route() {
+        let (app, _io) = build_router();
+        let response = app
+            .oneshot(Request::builder().uri("/nonexistent").body(Body::empty()).unwrap())
+            .await
+            .unwrap();
+
+        assert_eq!(response.status(), 404);
+    }
 }

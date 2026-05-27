@@ -2915,6 +2915,7 @@ dependencies = [
  "serde_json",
  "socketioxide",
  "tokio",
+ "tower",
  "tracing",
  "tracing-subscriber",
  "tray-icon",

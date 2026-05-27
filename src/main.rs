@@ -8,6 +8,8 @@ use clap::Parser;
 use std::cell::RefCell;
 use std::rc::Rc;
 use std::sync::Arc;
+use std::sync::mpsc;
+use std::time::{Duration, Instant};
 use tokio::sync::oneshot;
 use tray_icon::menu::MenuEvent;
 use winit::event::Event;
@@ -19,10 +21,6 @@ enum TrayEvent {
     Menu(muda::MenuId),
 }
 
-/// On macOS, `EventLoopProxy` is not `Sync` because it holds a `*mut CFRunLoopSource`.
-/// MenuEvent::set_event_handler requires `Fn + Send + Sync + 'static`.
-/// Since both the menu event handler and the event loop execute on the main thread,
-/// it is safe to mark the proxy as `Sync`.
 struct SyncProxy(EventLoopProxy<TrayEvent>);
 unsafe impl Sync for SyncProxy {}
 
@@ -47,6 +45,10 @@ fn main() {
     let (shutdown_tx, shutdown_rx) = oneshot::channel::<()>();
     let shutdown_tx = std::cell::Cell::new(Some(shutdown_tx));
 
+    // Channel for keyboard commands: server thread → main thread
+    let (kb_tx, kb_rx) = mpsc::channel::<keyboard::KeyCommand>();
+    keyboard::init_command_queue(kb_tx);
+
     std::thread::spawn(move || {
         let rt = tokio::runtime::Runtime::new().expect("Failed to create tokio runtime");
         rt.block_on(async { server::run(port, shutdown_rx).await });
@@ -67,13 +69,21 @@ fn main() {
     }));
 
     event_loop.run(move |event, elwt| {
-        elwt.set_control_flow(winit::event_loop::ControlFlow::Wait);
+        // Wake every 100ms to check for keyboard commands; negligible CPU impact
+        elwt.set_control_flow(winit::event_loop::ControlFlow::WaitUntil(
+            Instant::now() + Duration::from_millis(100),
+        ));
+
+        // Drain keyboard commands (execute on main thread for macOS CGEvent safety)
+        while let Ok(cmd) = kb_rx.try_recv() {
+            keyboard::execute(cmd);
+        }
 
         if let Event::UserEvent(TrayEvent::Menu(id)) = event {
             if id == toggle_id {
-                let enabled = crate::keyboard::is_enabled();
-                crate::keyboard::set_enabled(!enabled);
-                let new_state = crate::keyboard::is_enabled();
+                let enabled = keyboard::is_enabled();
+                keyboard::set_enabled(!enabled);
+                let new_state = keyboard::is_enabled();
                 let status = if new_state { "ON" } else { "PAUSED" };
                 let state = tray_state.borrow_mut();
                 state
@@ -98,7 +108,7 @@ fn main() {
     })
     .expect("Event loop error");
 
-    std::thread::sleep(std::time::Duration::from_millis(300));
+    std::thread::sleep(Duration::from_millis(300));
 }
 
 fn print_qr(url: &str) {
