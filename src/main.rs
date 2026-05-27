@@ -9,7 +9,7 @@ use clap::Parser;
 #[derive(Parser)]
 #[command(name = "type-bridge-rs", version, about = "Wi-Fi remote keyboard — type on your PC from your phone browser")]
 struct Cli {
-    #[arg(short, long, default_value = "5000")]
+    #[arg(short, long, default_value = "12345")]
     port: u16,
 }
 
@@ -21,7 +21,8 @@ fn main() {
     let port = cli.port;
 
     println!("\n⌨️  TypeBridge running!");
-    println!("📱 Open on your phone: http://{}:{}\n", ip, port);
+    println!("📱 Open on your phone: http://{}:{}", ip, port);
+    print_qr(&format!("http://{}:{}", ip, port));
 
     let (shutdown_tx, shutdown_rx) = tokio::sync::oneshot::channel::<()>();
 
@@ -36,4 +37,17 @@ fn main() {
 
     // Give the server thread a moment to clean up
     std::thread::sleep(std::time::Duration::from_millis(300));
+}
+
+fn print_qr(url: &str) {
+    use qrcode::QrCode;
+    use qrcode::render::unicode;
+
+    let code = QrCode::new(url).expect("Failed to generate QR code");
+    let image = code
+        .render::<unicode::Dense1x2>()
+        .dark_color(unicode::Dense1x2::Dark)
+        .light_color(unicode::Dense1x2::Light)
+        .build();
+    println!("{image}");
 }

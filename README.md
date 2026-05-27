@@ -65,7 +65,7 @@ cargo build --release
 ## 使用
 
 ```bash
-# 默认端口 5000
+# 默认端口 12345
 type-bridge-rs
 
 # 自定义端口
@@ -79,7 +79,7 @@ type-bridge-rs --version
 
 ```
 ⌨️  TypeBridge running!
-📱 Open on your phone: http://192.168.1.42:5000
+📱 Open on your phone: http://192.168.1.42:12345
 ```
 
 手机打开这个 URL，然后在电脑上点进任意应用，在手机上打字点发送即可。
@@ -140,7 +140,7 @@ TypeBridge 是 [TypeBridge](https://github.com/Hacker-Shohan/TypeBridge) 的 Rus
 
 ```
 Windows Defender 防火墙 → 高级设置
-→ 入站规则 → 新建规则 → 端口 → TCP → 5000 → 允许
+→ 入站规则 → 新建规则 → 端口 → TCP → 12345 → 允许
 ```
 
 ---
