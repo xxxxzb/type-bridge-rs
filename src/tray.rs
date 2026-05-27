@@ -11,13 +11,9 @@ pub struct TrayState {
     pub quit_id: muda::MenuId,
 }
 
-pub fn make_icon(active: bool) -> Icon {
-    let data: &[u8] = if active {
-        &crate::tray_icons::ICON_ON
-    } else {
-        &crate::tray_icons::ICON_OFF
-    };
-    Icon::from_rgba(data.to_vec(), 32, 32).expect("Failed to create tray icon from RGBA data")
+pub fn make_icon(_active: bool) -> Icon {
+    Icon::from_rgba(crate::tray_icons::ICON_ON.to_vec(), 32, 32)
+        .expect("Failed to create tray icon from RGBA data")
 }
 
 pub fn build_tray(ip: &str, port: u16) -> TrayState {
