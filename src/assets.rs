@@ -1,13 +1,15 @@
+/// Static HTML page. The token is NOT injected server-side;
+/// JavaScript reads it from `location.search` and passes it to
+/// the Socket.IO handshake. The `/` route guards against missing
+/// or wrong tokens before serving this page.
 pub const HTML: &str = r#"<!DOCTYPE html>
 <html lang="en">
 <head>
 <meta charset="UTF-8">
 <meta name="viewport" content="width=device-width, initial-scale=1.0, user-scalable=no">
 <title>TypeBridge</title>
-<script src="https://cdn.socket.io/4.7.5/socket.io.min.js"></script>
+<script src="/sio.min.js"></script>
 <style>
-  @import url('https://fonts.googleapis.com/css2?family=DM+Mono:ital,wght@0,400;0,500;1,400&family=Syne:wght@800&display=swap');
-
   *, *::before, *::after { box-sizing: border-box; margin: 0; padding: 0; }
 
   :root {
@@ -26,7 +28,7 @@ pub const HTML: &str = r#"<!DOCTYPE html>
     height: 100%;
     background: var(--bg);
     color: var(--text);
-    font-family: 'DM Mono', monospace;
+    font-family: 'SF Mono', 'Fira Code', 'Cascadia Code', 'Consolas', 'Menlo', monospace;
   }
 
   body::before {
@@ -57,8 +59,9 @@ pub const HTML: &str = r#"<!DOCTYPE html>
     justify-content: space-between;
   }
   .logo {
-    font-family: 'Syne', sans-serif;
+    font-family: system-ui, -apple-system, sans-serif;
     font-size: 18px;
+    font-weight: 800;
     background: linear-gradient(120deg, var(--accent), var(--accent2));
     -webkit-background-clip: text;
     -webkit-text-fill-color: transparent;
@@ -108,7 +111,7 @@ pub const HTML: &str = r#"<!DOCTYPE html>
     border: none;
     outline: none;
     resize: none;
-    font-family: 'DM Mono', monospace;
+    font-family: 'SF Mono', 'Fira Code', 'Cascadia Code', 'Consolas', 'Menlo', monospace;
     font-size: 16px;
     color: var(--text);
     line-height: 1.6;
@@ -123,7 +126,7 @@ pub const HTML: &str = r#"<!DOCTYPE html>
     border: none;
     background: linear-gradient(135deg, var(--accent), var(--accent2));
     color: #fff;
-    font-family: 'DM Mono', monospace;
+    font-family: inherit;
     font-size: 15px;
     font-weight: 500;
     cursor: pointer;
@@ -148,7 +151,7 @@ pub const HTML: &str = r#"<!DOCTYPE html>
     border: 1px solid var(--border);
     background: var(--surface);
     color: var(--text);
-    font-family: 'DM Mono', monospace;
+    font-family: inherit;
     font-size: 13px;
     cursor: pointer;
     display: flex;
@@ -247,7 +250,10 @@ pub const HTML: &str = r#"<!DOCTYPE html>
 <div class="toast" id="toast"></div>
 
 <script>
-const socket   = io();
+// Read token from the page URL — the server already validated it before serving this page
+const params = new URLSearchParams(location.search);
+const token = params.get('token') || '';
+const socket = io("/", { query: { token: token } });
 const input    = document.getElementById('input');
 const sendBtn  = document.getElementById('send-btn');
 const backBtn  = document.getElementById('back-btn');
@@ -328,8 +334,18 @@ mod tests {
     }
 
     #[test]
-    fn test_html_contains_socket_io() {
-        assert!(HTML.contains("socket.io"));
+    fn test_html_does_not_contain_cdn_socket_io() {
+        assert!(!HTML.contains("https://cdn.socket.io"));
+    }
+
+    #[test]
+    fn test_html_does_not_contain_google_fonts() {
+        assert!(!HTML.contains("fonts.googleapis.com"));
+    }
+
+    #[test]
+    fn test_html_uses_local_socket_io() {
+        assert!(HTML.contains("/sio.min.js"));
     }
 
     #[test]
@@ -360,5 +376,18 @@ mod tests {
     #[test]
     fn test_html_closes_properly() {
         assert!(HTML.ends_with("</html>"));
+    }
+
+    #[test]
+    fn test_html_reads_token_from_url() {
+        // JS must read token from location.search, NOT from server-injected value
+        assert!(HTML.contains("URLSearchParams(location.search)"));
+        assert!(!HTML.contains("test-token-123")); // no hardcoded test data
+    }
+
+    #[test]
+    fn test_html_does_not_contain_server_injected_token() {
+        // The HTML must be static — no token injected by server-side fn
+        assert!(!HTML.contains("__TOKEN__"));
     }
 }

@@ -1,16 +1,21 @@
-use std::net::UdpSocket;
+use std::net::Ipv4Addr;
 
+/// Enumerate non-loopback IPv4 interfaces and return the first suitable address.
+/// Falls back to 127.0.0.1 when no LAN interface is found.
 pub fn get_local_ip() -> String {
-    match UdpSocket::bind("0.0.0.0:0") {
-        Ok(socket) => match socket.connect("8.8.8.8:80") {
-            Ok(()) => match socket.local_addr() {
-                Ok(addr) => addr.ip().to_string(),
-                Err(_) => "127.0.0.1".into(),
-            },
-            Err(_) => "127.0.0.1".into(),
-        },
-        Err(_) => "127.0.0.1".into(),
+    if let Ok(ifaces) = if_addrs::get_if_addrs() {
+        for iface in ifaces {
+            if iface.is_loopback() {
+                continue;
+            }
+            if let std::net::IpAddr::V4(v4) = iface.ip() {
+                if !v4.is_loopback() && v4 != Ipv4Addr::UNSPECIFIED {
+                    return v4.to_string();
+                }
+            }
+        }
     }
+    "127.0.0.1".into()
 }
 
 #[cfg(test)]
@@ -26,15 +31,19 @@ mod tests {
     #[test]
     fn test_get_local_ip_valid_format() {
         let ip = get_local_ip();
-        // Should be a valid IPv4 or IPv6 address
-        let parts: Vec<&str> = ip.split('.').collect();
-        if parts.len() == 4 {
-            for part in parts {
-                let n: u8 = part.parse().expect("valid u8 octet");
-                assert!(n > 0 || part == "0");
-            }
-        }
-        // Fallback is 127.0.0.1
+        // Fallback is 127.0.0.1 — always a valid IP
         assert!(ip.parse::<std::net::IpAddr>().is_ok());
+    }
+
+    #[test]
+    fn test_filter_loopback_rejected() {
+        // Verify that pure filter rejects loopback
+        let ip = get_local_ip();
+        if ip == "127.0.0.1" {
+            // Accept fallback — means no non-loopback interface was found
+        } else {
+            let addr: std::net::Ipv4Addr = ip.parse().unwrap();
+            assert!(!addr.is_loopback());
+        }
     }
 }
