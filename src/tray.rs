@@ -8,6 +8,7 @@ pub struct TrayState {
     pub tray: TrayIcon,
     pub status_item: MenuItem,
     pub toggle_id: muda::MenuId,
+    pub show_qr_id: muda::MenuId,
     pub copy_url_id: muda::MenuId,
     pub quit_id: muda::MenuId,
 }
@@ -37,6 +38,7 @@ pub fn build_tray(url: &str) -> TrayState {
 
     let status = MenuItem::new("Typing: ON", false, None);
     let toggle = MenuItem::new("Toggle Typing", true, None);
+    let show_qr = MenuItem::new("Show QR Code", true, None);
     let copy_url = MenuItem::new("Copy URL", true, None);
     let quit = MenuItem::new("Quit", true, None);
 
@@ -46,6 +48,8 @@ pub fn build_tray(url: &str) -> TrayState {
         .unwrap_or_else(|e| tracing::error!("Failed to add separator: {e}"));
     menu.append(&toggle)
         .unwrap_or_else(|e| tracing::error!("Failed to add Toggle: {e}"));
+    menu.append(&show_qr)
+        .unwrap_or_else(|e| tracing::error!("Failed to add Show QR: {e}"));
     menu.append(&copy_url)
         .unwrap_or_else(|e| tracing::error!("Failed to add Copy URL: {e}"));
     menu.append(&quit)
@@ -53,6 +57,7 @@ pub fn build_tray(url: &str) -> TrayState {
 
     let status_item = status.clone();
     let toggle_id = toggle.id().clone();
+    let show_qr_id = show_qr.id().clone();
     let copy_url_id = copy_url.id().clone();
     let quit_id = quit.id().clone();
 
@@ -67,6 +72,7 @@ pub fn build_tray(url: &str) -> TrayState {
         tray,
         status_item,
         toggle_id,
+        show_qr_id,
         copy_url_id,
         quit_id,
     }

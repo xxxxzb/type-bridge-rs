@@ -134,6 +134,7 @@ fn main() {
     let url_for_tray = format!("http://{}:{}/?token={}", ip, port, token);
     let tray_state = Rc::new(RefCell::new(tray::build_tray(&url_for_tray)));
     let toggle_id = tray_state.borrow().toggle_id.clone();
+    let show_qr_id = tray_state.borrow().show_qr_id.clone();
     let copy_url_id = tray_state.borrow().copy_url_id.clone();
     let quit_id = tray_state.borrow().quit_id.clone();
 
@@ -177,8 +178,8 @@ fn main() {
                 keyboard::execute(cmd);
             }
 
-            // Auto-close QR window 3s after menu likely dismissed
-            if qr_state.borrow().is_some() && last_click.elapsed() > Duration::from_secs(3) {
+            // Auto-close QR window 5s after last interaction
+            if qr_state.borrow().is_some() && last_click.elapsed() > Duration::from_secs(5) {
                 *qr_state.borrow_mut() = None;
                 last_click = Instant::now();
             }
@@ -207,6 +208,8 @@ fn main() {
                             .set_tooltip(Some(format!("TypeBridge — {}\n{}", status, url_for_tray)))
                             .unwrap_or_else(|e| tracing::error!("Tooltip: {e}"));
                         state.status_item.set_text(format!("Typing: {status}"));
+                    } else if id == show_qr_id {
+                        open_qr_window(&url_clone, elwt, &qr_state);
                     } else if id == copy_url_id {
                         copy_to_clipboard(&url_for_tray);
                     } else if id == quit_id {
