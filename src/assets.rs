@@ -174,6 +174,45 @@ pub const HTML: &str = r#"<!DOCTYPE html>
   }
   .act.enter:active { background: rgba(124,106,247,.08); }
 
+  .hidden { display: none !important; }
+
+  /* ── history section ── */
+  .history-box { margin-top: 4px; }
+  .history-list {
+    display: flex;
+    flex-direction: column;
+    gap: 2px;
+    padding: 4px 8px 8px;
+  }
+  .history-item {
+    display: flex;
+    align-items: center;
+    gap: 8px;
+    padding: 10px 12px;
+    border-radius: 10px;
+    background: transparent;
+    border: 1px solid transparent;
+    font-size: 13px;
+    color: var(--text);
+    cursor: pointer;
+    white-space: nowrap;
+    overflow: hidden;
+    text-overflow: ellipsis;
+    transition: background .15s, border-color .15s;
+    -webkit-tap-highlight-color: transparent;
+    user-select: none;
+  }
+  .history-item::before {
+    content: '↩';
+    font-size: 11px;
+    color: var(--muted);
+    flex-shrink: 0;
+  }
+  .history-item:active {
+    background: rgba(124,106,247,.08);
+    border-color: rgba(124,106,247,.15);
+  }
+
   .toast {
     position: fixed;
     bottom: 80px;
@@ -243,6 +282,11 @@ pub const HTML: &str = r#"<!DOCTYPE html>
       </svg>
       enter / new line on PC
     </button>
+  </div>
+
+  <div class="box history-box hidden" id="history-section">
+    <div class="box-label">recent</div>
+    <div class="history-list" id="history-list"></div>
   </div>
 
 </div>
@@ -315,6 +359,38 @@ enterBtn.addEventListener('click', () => {
   socket.emit('press_key', { key: 'enter' });
   showToast('↵ enter');
 });
+
+// ── History ──
+const historySection = document.getElementById('history-section');
+const historyList   = document.getElementById('history-list');
+
+socket.on('history', (entries) => {
+  renderHistory(entries || []);
+});
+
+function renderHistory(entries) {
+  if (!entries || entries.length === 0) {
+    historySection.classList.add('hidden');
+    return;
+  }
+  historySection.classList.remove('hidden');
+  historyList.innerHTML = '';
+  for (const text of entries) {
+    const item = document.createElement('div');
+    item.className = 'history-item';
+    item.textContent = text.length > 100 ? text.slice(0, 100) + '…' : text;
+    item.dataset.text = text;
+    historyList.appendChild(item);
+  }
+}
+
+historyList.addEventListener('click', (e) => {
+  const item = e.target.closest('.history-item');
+  if (!item) return;
+  input.value = item.dataset.text;
+  input.focus();
+  window.scrollTo({ top: 0, behavior: 'smooth' });
+});
 </script>
 </body>
 </html>"#;
@@ -371,6 +447,26 @@ mod tests {
     #[test]
     fn test_html_contains_type_text_event() {
         assert!(HTML.contains("type_text"));
+    }
+
+    #[test]
+    fn test_html_has_history_section() {
+        assert!(HTML.contains("id=\"history-section\""));
+    }
+
+    #[test]
+    fn test_html_has_history_event_handler() {
+        assert!(HTML.contains("socket.on('history'"));
+    }
+
+    #[test]
+    fn test_html_has_history_list() {
+        assert!(HTML.contains("id=\"history-list\""));
+    }
+
+    #[test]
+    fn test_html_history_uses_textcontent() {
+        assert!(HTML.contains("item.textContent"));
     }
 
     #[test]

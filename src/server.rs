@@ -7,7 +7,8 @@ use axum::Router;
 use serde::Deserialize;
 use socketioxide::extract::{Data, SocketRef};
 use socketioxide::SocketIo;
-use std::sync::Arc;
+use std::collections::VecDeque;
+use std::sync::{Arc, Mutex};
 use tokio::sync::oneshot;
 
 static SOCKET_IO_JS: &str = include_str!("socket.io.min.js");
@@ -20,6 +21,23 @@ struct TypeTextPayload {
 #[derive(Deserialize)]
 struct PressKeyPayload {
     key: String,
+}
+
+const HISTORY_MAX: usize = 30;
+
+fn add_to_history(entries: &mut VecDeque<String>, text: &str, max: usize) -> bool {
+    let text = text.trim();
+    if text.is_empty() {
+        return false;
+    }
+    if entries.front().is_some_and(|last| last == text) {
+        return false;
+    }
+    if entries.len() >= max {
+        entries.pop_back();
+    }
+    entries.push_front(text.to_string());
+    true
 }
 
 /// Pure token validation from raw query string.
@@ -38,6 +56,8 @@ fn build_router(token: &str) -> (Router, SocketIo) {
     let valid_token_for_io = Arc::new(token.to_string());
     let valid_token_for_mw = Arc::clone(&valid_token_for_io);
     let valid_token_for_index = token.to_string();
+    let history: Arc<Mutex<VecDeque<String>>> =
+        Arc::new(Mutex::new(VecDeque::with_capacity(HISTORY_MAX)));
 
     // ── HTTP-level auth middleware ──
     let auth = middleware::from_fn(
@@ -77,10 +97,27 @@ fn build_router(token: &str) -> (Router, SocketIo) {
         let sid = socket.id;
         tracing::info!("[+] Client connected: {sid}");
 
+        {
+            let entries: Vec<String> = history.lock().unwrap().iter().cloned().collect();
+            let _ = socket.emit("history", &entries);
+        }
+
+        let history_for_handler = history.clone();
         socket.on(
             "type_text",
-            |_: SocketRef, Data(payload): Data<TypeTextPayload>| async move {
-                crate::keyboard::queue_type_text(payload.text);
+            move |socket: SocketRef, Data(payload): Data<TypeTextPayload>| {
+                let history = history_for_handler.clone();
+                async move {
+                    let text = payload.text.trim().to_string();
+                    {
+                        let mut guard = history.lock().unwrap();
+                        add_to_history(&mut guard, &text, HISTORY_MAX);
+                        let entries: Vec<String> = guard.iter().cloned().collect();
+                        drop(guard);
+                        let _ = socket.emit("history", &entries);
+                    }
+                    crate::keyboard::queue_type_text(payload.text);
+                }
             },
         );
         socket.on("backspace", |_: SocketRef, Data(()): Data<()>| async move {
@@ -195,6 +232,55 @@ mod tests {
 
     fn test_router() -> Router {
         build_router(TEST_TOKEN).0
+    }
+
+    // ── add_to_history unit tests ────────────────────────────────
+
+    #[test]
+    fn test_add_to_history_inserts_entry() {
+        let mut h = VecDeque::new();
+        assert!(add_to_history(&mut h, "hello", 30));
+        assert_eq!(h.len(), 1);
+        assert_eq!(h.front().unwrap(), "hello");
+    }
+
+    #[test]
+    fn test_add_to_history_dedup_consecutive() {
+        let mut h = VecDeque::new();
+        assert!(add_to_history(&mut h, "hello", 30));
+        assert!(!add_to_history(&mut h, "hello", 30));
+        assert_eq!(h.len(), 1);
+    }
+
+    #[test]
+    fn test_add_to_history_allows_different_after_same() {
+        let mut h = VecDeque::new();
+        assert!(add_to_history(&mut h, "hello", 30));
+        assert!(!add_to_history(&mut h, "hello", 30));
+        assert!(add_to_history(&mut h, "world", 30));
+        assert_eq!(h.len(), 2);
+    }
+
+    #[test]
+    fn test_add_to_history_respects_max() {
+        let mut h = VecDeque::new();
+        for i in 0..30 {
+            assert!(add_to_history(&mut h, &format!("text-{i}"), 30));
+        }
+        assert_eq!(h.len(), 30);
+        assert_eq!(h.back().unwrap(), "text-0");
+        assert!(add_to_history(&mut h, "new-text", 30));
+        assert_eq!(h.len(), 30);
+        assert_eq!(h.front().unwrap(), "new-text");
+        assert_eq!(h.back().unwrap(), "text-1");
+    }
+
+    #[test]
+    fn test_add_to_history_rejects_empty() {
+        let mut h = VecDeque::new();
+        assert!(!add_to_history(&mut h, "", 30));
+        assert!(!add_to_history(&mut h, "   ", 30));
+        assert!(h.is_empty());
     }
 
     // ── check_token unit tests ──────────────────────────────────
@@ -724,6 +810,64 @@ mod e2e_tests {
         }
 
         // ── clean shutdown ───────────────────────────────────────
+        let _ = shutdown_tx.send(());
+    }
+
+    #[tokio::test]
+    async fn test_e2e_history_flow() {
+        // Isolate keyboard state so this test doesn't interfere with
+        // other E2E tests that share the global COMMAND_TX / ENABLED.
+        let mut guard = keyboard::TestGuard::new();
+        crate::keyboard::set_enabled(true);
+        let (test_tx, test_rx) = mpsc::sync_channel::<KeyCommand>(16);
+        guard.replace_command_tx(test_tx);
+
+        let (port, shutdown_tx) = spawn_server(E2E_TOKEN.to_string());
+        wait_for_server(port, Duration::from_secs(3)).await;
+
+        let sid = eio_handshake(port, E2E_TOKEN).await.expect("handshake");
+
+        // Manually connect — check the full poll body for the history event
+        let _ = http_post(
+            port,
+            &format!("/socket.io/?EIO=4&transport=polling&sid={sid}"),
+            "40",
+        )
+        .await;
+
+        let (status, body) = http_get(
+            port,
+            &format!("/socket.io/?EIO=4&transport=polling&sid={sid}"),
+        )
+        .await;
+        assert_eq!(status, 200);
+        assert!(
+            body.contains("42[\"history\""),
+            "initial history event missing: {body}"
+        );
+
+        // Send type_text and poll for updated history
+        sio_emit(port, &sid, "type_text", "{\"text\":\"e2e-history-text\"}")
+            .await
+            .expect("type_text emit");
+
+        let (status, body) = http_get(
+            port,
+            &format!("/socket.io/?EIO=4&transport=polling&sid={sid}"),
+        )
+        .await;
+        assert_eq!(status, 200);
+        assert!(
+            body.contains("e2e-history-text"),
+            "history should contain sent text: {body}"
+        );
+
+        // Also verify the keyboard command was queued
+        match recv_cmd(&test_rx) {
+            KeyCommand::TypeText(text) => assert_eq!(text, "e2e-history-text"),
+            other => panic!("expected TypeText, got {other:?}"),
+        }
+
         let _ = shutdown_tx.send(());
     }
 }
