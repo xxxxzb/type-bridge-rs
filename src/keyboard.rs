@@ -17,6 +17,7 @@ pub enum KeyCommand {
     TypeText(String),
     Backspace,
     Enter,
+    SelectAll,
 }
 
 pub fn init_command_queue(tx: mpsc::SyncSender<KeyCommand>) {
@@ -143,6 +144,13 @@ pub fn queue_enter() {
     send_command(KeyCommand::Enter);
 }
 
+pub fn queue_select_all() {
+    if !is_enabled() {
+        return;
+    }
+    send_command(KeyCommand::SelectAll);
+}
+
 // ── Merging: consecutive TypeText are joined before execution ──────
 
 /// Merge consecutive `TypeText` commands into one, respecting
@@ -158,7 +166,7 @@ pub fn merge_commands(cmds: Vec<KeyCommand>) -> Vec<KeyCommand> {
                     out.push(KeyCommand::TypeText(t));
                 }
             }
-            other => out.push(other),
+            other => out.push(other), // Backspace, Enter, SelectAll — unmergeable
         }
     }
     out
@@ -171,6 +179,7 @@ pub fn execute(cmd: KeyCommand) {
         KeyCommand::TypeText(text) => execute_type_text(&text),
         KeyCommand::Backspace => execute_backspace(),
         KeyCommand::Enter => execute_enter(),
+        KeyCommand::SelectAll => execute_select_all(),
     }
 }
 
@@ -229,6 +238,25 @@ fn execute_enter() {
     let mut enigo = enigo();
     if let Err(e) = enigo.key(Key::Return, Direction::Click) {
         tracing::error!("Enter keystroke failed: {e}");
+    }
+}
+
+fn execute_select_all() {
+    let mut enigo = enigo();
+
+    #[cfg(target_os = "macos")]
+    let mod_key = Key::Meta;
+    #[cfg(not(target_os = "macos"))]
+    let mod_key = Key::Control;
+
+    if let Err(e) = enigo.key(mod_key, Direction::Press) {
+        tracing::error!("SelectAll: failed to press modifier: {e}");
+    }
+    if let Err(e) = enigo.key(Key::Unicode('a'), Direction::Click) {
+        tracing::error!("SelectAll: failed to press 'a': {e}");
+    }
+    if let Err(e) = enigo.key(mod_key, Direction::Release) {
+        tracing::error!("SelectAll: failed to release modifier: {e}");
     }
 }
 
@@ -370,6 +398,17 @@ mod tests {
             KeyCommand::TypeText("x".into()),
             KeyCommand::Backspace,
             KeyCommand::TypeText("y".into()),
+        ];
+        let merged = merge_commands(cmds);
+        assert_eq!(merged.len(), 3);
+    }
+
+    #[test]
+    fn test_merge_respects_select_all_boundary() {
+        let cmds = vec![
+            KeyCommand::TypeText("before".into()),
+            KeyCommand::SelectAll,
+            KeyCommand::TypeText("after".into()),
         ];
         let merged = merge_commands(cmds);
         assert_eq!(merged.len(), 3);

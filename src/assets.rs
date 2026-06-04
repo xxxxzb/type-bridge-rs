@@ -342,16 +342,12 @@ input.addEventListener('keydown', (e) => {
 });
 
 backBtn.addEventListener('click', () => {
-  const v = input.value;
-  if (v.length > 0) {
-    input.value = v.slice(0, -1);
-  }
-  socket.emit('backspace', {});
+  socket.emit('backspace', null);
   showToast('⌫');
 });
 
 clearBtn.addEventListener('click', () => {
-  input.value = '';
+  socket.emit('clear_input', null);
   showToast('cleared');
 });
 

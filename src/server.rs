@@ -133,6 +133,11 @@ fn build_router(token: &str) -> (Router, SocketIo) {
             },
         );
 
+        socket.on("clear_input", |_: SocketRef, Data(()): Data<()>| async move {
+            crate::keyboard::queue_select_all();
+            crate::keyboard::queue_backspace();
+        });
+
         socket.on_disconnect(move |_: SocketRef| {
             tracing::info!("[-] Client disconnected: {sid}");
         });
