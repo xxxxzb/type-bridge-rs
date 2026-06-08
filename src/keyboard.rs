@@ -165,26 +165,55 @@ mod tests {
         assert!(is_enabled());
     }
 
-    // ── disabled blocks queuing ─────────────────────────────────
+    // ── disabled returns Paused ─────────────────────────────────
 
     #[test]
-    fn test_queue_type_text_returns_when_disabled() {
+    fn test_queue_type_text_returns_paused_when_disabled() {
         set_enabled(false);
-        assert!(!is_enabled());
-        // queue_type_text / queue_backspace / queue_enter all check
-        // is_enabled() first and return early when false
+        assert_eq!(queue_type_text("hello".into()), CommandResult::Paused);
     }
 
     #[test]
-    fn test_queue_backspace_returns_when_disabled() {
+    fn test_queue_backspace_returns_paused_when_disabled() {
         set_enabled(false);
-        assert!(!is_enabled());
+        assert_eq!(queue_backspace(), CommandResult::Paused);
     }
 
     #[test]
-    fn test_queue_enter_returns_when_disabled() {
+    fn test_queue_enter_returns_paused_when_disabled() {
         set_enabled(false);
-        assert!(!is_enabled());
+        assert_eq!(queue_enter(), CommandResult::Paused);
+    }
+
+    // ── overlong text returns TooLong ──────────────────────────
+
+    #[test]
+    fn test_queue_type_text_returns_too_long() {
+        set_enabled(true);
+        let long = "x".repeat(MAX_TEXT_LEN + 1);
+        assert_eq!(queue_type_text(long), CommandResult::TooLong);
+    }
+
+    // ── full channel returns Full ──────────────────────────────
+
+    #[test]
+    fn test_queue_returns_full_when_channel_full() {
+        set_enabled(true);
+        let (test_tx, _test_rx) = mpsc::sync_channel::<KeyCommand>(1);
+        // Replace the global tx with a tiny capacity one
+        COMMAND_TX.set(Mutex::new(test_tx)).unwrap_or(());
+        assert_eq!(queue_type_text("first".into()), CommandResult::Queued);
+        assert_eq!(queue_type_text("second".into()), CommandResult::Full);
+    }
+
+    // ── queued on success ──────────────────────────────────────
+
+    #[test]
+    fn test_queue_type_text_returns_queued() {
+        set_enabled(true);
+        let (test_tx, _test_rx) = mpsc::sync_channel::<KeyCommand>(8);
+        COMMAND_TX.set(Mutex::new(test_tx)).unwrap_or(());
+        assert_eq!(queue_type_text("hello".into()), CommandResult::Queued);
     }
 
     // ── command queue end-to-end ────────────────────────────────
