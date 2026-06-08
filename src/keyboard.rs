@@ -20,6 +20,14 @@ pub enum KeyCommand {
     SelectAll,
 }
 
+#[derive(Debug, PartialEq, Eq)]
+pub enum CommandResult {
+    Queued,
+    Paused,
+    Full,
+    TooLong,
+}
+
 pub fn init_command_queue(tx: mpsc::SyncSender<KeyCommand>) {
     *COMMAND_TX.lock().unwrap_or_else(|e| e.into_inner()) = Some(tx);
 }
@@ -104,51 +112,59 @@ pub fn is_enabled() -> bool {
 
 // ── Queue API (called from server thread) ──────────────────────────
 
-fn send_command(cmd: KeyCommand) {
-    if let Some(tx) = COMMAND_TX
+fn send_command(cmd: KeyCommand) -> CommandResult {
+    let guard = COMMAND_TX
         .lock()
-        .unwrap_or_else(|e| e.into_inner())
-        .as_ref()
-    {
-        if tx.try_send(cmd).is_err() {
-            tracing::warn!("Command queue full, dropping event");
-        }
+        .unwrap_or_else(|e| e.into_inner());
+    match guard.as_ref() {
+        Some(tx) => match tx.try_send(cmd) {
+            Ok(_) => CommandResult::Queued,
+            Err(mpsc::TrySendError::Full(_)) => CommandResult::Full,
+            Err(mpsc::TrySendError::Disconnected(_)) => {
+                tracing::warn!("Command channel disconnected");
+                CommandResult::Full
+            }
+        },
+        None => CommandResult::Full,
     }
 }
 
-pub fn queue_type_text(text: String) {
-    if !is_enabled() || text.is_empty() {
-        return;
+pub fn queue_type_text(text: String) -> CommandResult {
+    if !is_enabled() {
+        return CommandResult::Paused;
+    }
+    if text.is_empty() {
+        return CommandResult::Paused;
     }
     if text.len() > MAX_TEXT_LEN {
         tracing::warn!(
             "TypeText too long ({} chars), max {MAX_TEXT_LEN}, rejecting",
             text.len()
         );
-        return;
+        return CommandResult::TooLong;
     }
-    send_command(KeyCommand::TypeText(text));
+    send_command(KeyCommand::TypeText(text))
 }
 
-pub fn queue_backspace() {
+pub fn queue_backspace() -> CommandResult {
     if !is_enabled() {
-        return;
+        return CommandResult::Paused;
     }
-    send_command(KeyCommand::Backspace);
+    send_command(KeyCommand::Backspace)
 }
 
-pub fn queue_enter() {
+pub fn queue_enter() -> CommandResult {
     if !is_enabled() {
-        return;
+        return CommandResult::Paused;
     }
-    send_command(KeyCommand::Enter);
+    send_command(KeyCommand::Enter)
 }
 
-pub fn queue_select_all() {
+pub fn queue_select_all() -> CommandResult {
     if !is_enabled() {
-        return;
+        return CommandResult::Paused;
     }
-    send_command(KeyCommand::SelectAll);
+    send_command(KeyCommand::SelectAll)
 }
 
 // ── Merging: consecutive TypeText are joined before execution ──────
@@ -305,50 +321,60 @@ mod tests {
         assert!(is_enabled());
     }
 
-    // ── disabled blocks queuing ─────────────────────────────────
+    // ── disabled returns Paused ─────────────────────────────────
 
     #[test]
-    fn test_queue_type_text_returns_when_disabled() {
+    fn test_queue_type_text_returns_paused_when_disabled() {
         let _guard = TestGuard::new();
         set_enabled(false);
-        assert!(!is_enabled());
+        assert_eq!(queue_type_text("hello".into()), CommandResult::Paused);
     }
 
     #[test]
-    fn test_queue_backspace_returns_when_disabled() {
+    fn test_queue_backspace_returns_paused_when_disabled() {
         let _guard = TestGuard::new();
         set_enabled(false);
-        assert!(!is_enabled());
+        assert_eq!(queue_backspace(), CommandResult::Paused);
     }
 
     #[test]
-    fn test_queue_enter_returns_when_disabled() {
+    fn test_queue_enter_returns_paused_when_disabled() {
         let _guard = TestGuard::new();
         set_enabled(false);
-        assert!(!is_enabled());
+        assert_eq!(queue_enter(), CommandResult::Paused);
     }
 
-    // ── guard conditions (pure logic, no global channel needed) ──
+    // ── overlong text returns TooLong ──────────────────────────
 
     #[test]
-    fn test_disabled_blocks_type_text() {
-        // queue_type_text checks is_enabled() first and returns early
+    fn test_queue_type_text_returns_too_long() {
         let _guard = TestGuard::new();
-        set_enabled(false);
-        assert!(!is_enabled());
-    }
-
-    #[test]
-    fn test_overlong_text_detected() {
-        // The length guard: text > MAX_TEXT_LEN is rejected
+        set_enabled(true);
         let long = "x".repeat(MAX_TEXT_LEN + 1);
-        assert!(long.len() > MAX_TEXT_LEN);
+        assert_eq!(queue_type_text(long), CommandResult::TooLong);
     }
 
+    // ── full channel returns Full ──────────────────────────────
+
     #[test]
-    fn test_empty_text_guard() {
-        // Empty string triggers early return in queue_type_text
-        assert!(String::new().is_empty());
+    fn test_queue_returns_full_when_channel_full() {
+        let _guard = TestGuard::new();
+        set_enabled(true);
+        let (test_tx, _test_rx) = mpsc::sync_channel::<KeyCommand>(1);
+        *COMMAND_TX.lock().unwrap() = Some(test_tx);
+        assert_eq!(queue_type_text("first".into()), CommandResult::Queued);
+        assert_eq!(queue_type_text("second".into()), CommandResult::Full);
+    }
+
+    // ── queued on success ──────────────────────────────────────
+
+    #[test]
+    fn test_queue_type_text_returns_queued() {
+        let _guard = TestGuard::new();
+        set_enabled(true);
+        let (test_tx, _test_rx) = mpsc::sync_channel::<KeyCommand>(8);
+        *COMMAND_TX.lock().unwrap() = Some(test_tx);
+        assert_eq!(queue_type_text("hello".into()), CommandResult::Queued);
     }
 
     // ── bounded channel backpressure (direct channel, no global) ──
