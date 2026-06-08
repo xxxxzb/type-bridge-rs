@@ -5,8 +5,6 @@ pub const HTML: &str = r#"<!DOCTYPE html>
 <meta name="viewport" content="width=device-width, initial-scale=1.0, user-scalable=no">
 <title>TypeBridge</title>
 <style>
-  @import url('https://fonts.googleapis.com/css2?family=DM+Mono:ital,wght@0,400;0,500;1,400&family=Syne:wght@800&display=swap');
-
   *, *::before, *::after { box-sizing: border-box; margin: 0; padding: 0; }
 
   :root {
@@ -25,7 +23,7 @@ pub const HTML: &str = r#"<!DOCTYPE html>
     height: 100%;
     background: var(--bg);
     color: var(--text);
-    font-family: 'DM Mono', monospace;
+    font-family: 'SF Mono', 'Fira Code', 'Cascadia Code', 'Consolas', 'Menlo', monospace;
   }
 
   body::before {
@@ -56,7 +54,7 @@ pub const HTML: &str = r#"<!DOCTYPE html>
     justify-content: space-between;
   }
   .logo {
-    font-family: 'Syne', sans-serif;
+    font-family: system-ui, -apple-system, sans-serif;
     font-size: 18px;
     background: linear-gradient(120deg, var(--accent), var(--accent2));
     -webkit-background-clip: text;
@@ -107,7 +105,7 @@ pub const HTML: &str = r#"<!DOCTYPE html>
     border: none;
     outline: none;
     resize: none;
-    font-family: 'DM Mono', monospace;
+    font-family: 'SF Mono', 'Fira Code', 'Cascadia Code', 'Consolas', 'Menlo', monospace;
     font-size: 16px;
     color: var(--text);
     line-height: 1.6;
@@ -122,7 +120,7 @@ pub const HTML: &str = r#"<!DOCTYPE html>
     border: none;
     background: linear-gradient(135deg, var(--accent), var(--accent2));
     color: #fff;
-    font-family: 'DM Mono', monospace;
+    font-family: 'SF Mono', 'Fira Code', 'Cascadia Code', 'Consolas', 'Menlo', monospace;
     font-size: 15px;
     font-weight: 500;
     cursor: pointer;
@@ -147,7 +145,7 @@ pub const HTML: &str = r#"<!DOCTYPE html>
     border: 1px solid var(--border);
     background: var(--surface);
     color: var(--text);
-    font-family: 'DM Mono', monospace;
+    font-family: 'SF Mono', 'Fira Code', 'Cascadia Code', 'Consolas', 'Menlo', monospace;
     font-size: 13px;
     cursor: pointer;
     display: flex;

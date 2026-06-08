@@ -133,7 +133,9 @@ fn build_router(token: &str) -> (Router, SocketIo) {
             "press_key",
             |_: SocketRef, Data(payload): Data<PressKeyPayload>| async move {
                 match payload.key.as_str() {
-                    "enter" => crate::keyboard::queue_enter(),
+                    "enter" => {
+                        crate::keyboard::queue_enter();
+                    }
                     other => tracing::warn!("Unknown key requested: {other}"),
                 }
             },
