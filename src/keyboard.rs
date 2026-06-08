@@ -9,7 +9,7 @@ const MAX_TEXT_LEN: usize = 10_000;
 
 static ENABLED: AtomicBool = AtomicBool::new(true);
 static ENIGO: OnceLock<Mutex<Enigo>> = OnceLock::new();
-static COMMAND_TX: std::sync::Mutex<Option<mpsc::SyncSender<KeyCommand>>> =
+pub(crate) static COMMAND_TX: std::sync::Mutex<Option<mpsc::SyncSender<KeyCommand>>> =
     std::sync::Mutex::new(None);
 
 #[derive(Debug)]

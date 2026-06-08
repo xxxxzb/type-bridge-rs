@@ -465,6 +465,7 @@ mod e2e_tests {
     #[tokio::test]
     #[serial_test::serial]
     async fn test_e2e_auth_rejection() {
+        let _guard = crate::keyboard::TestGuard::new();
         let (port, tx) = spawn_server(E2E_TOKEN.to_string());
         wait_for_server(port, Duration::from_secs(3)).await;
         assert_eq!(http_get(port, "/api/status", None).await.0, 401);
