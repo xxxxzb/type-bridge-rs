@@ -358,10 +358,10 @@ mod tests {
 
     #[test]
     fn test_queue_returns_full_when_channel_full() {
-        let _guard = TestGuard::new();
+        let mut guard = TestGuard::new();
         set_enabled(true);
         let (test_tx, _test_rx) = mpsc::sync_channel::<KeyCommand>(1);
-        *COMMAND_TX.lock().unwrap() = Some(test_tx);
+        guard.replace_command_tx(test_tx);
         assert_eq!(queue_type_text("first".into()), CommandResult::Queued);
         assert_eq!(queue_type_text("second".into()), CommandResult::Full);
     }
@@ -370,10 +370,10 @@ mod tests {
 
     #[test]
     fn test_queue_type_text_returns_queued() {
-        let _guard = TestGuard::new();
+        let mut guard = TestGuard::new();
         set_enabled(true);
         let (test_tx, _test_rx) = mpsc::sync_channel::<KeyCommand>(8);
-        *COMMAND_TX.lock().unwrap() = Some(test_tx);
+        guard.replace_command_tx(test_tx);
         assert_eq!(queue_type_text("hello".into()), CommandResult::Queued);
     }
 

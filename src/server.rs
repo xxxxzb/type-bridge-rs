@@ -190,24 +190,25 @@ mod tests {
 
     fn init_test_globals() {
         use std::sync::OnceLock;
-        static BRIDGE: OnceLock<mpsc::Sender<crate::keyboard::KeyCommand>> = OnceLock::new();
-        BRIDGE.get_or_init(|| {
-            let (tx, rx) = mpsc::channel::<crate::keyboard::KeyCommand>();
-            std::thread::spawn(move || { while rx.recv().is_ok() {} });
-            tx
+        // Set up the bridge COMMAND_TX exactly once, under TestGuard
+        // so we don't race with E2E tests that replace COMMAND_TX.
+        static CHANNELS: OnceLock<()> = OnceLock::new();
+        CHANNELS.get_or_init(|| {
+            let _guard = crate::keyboard::TestGuard::new();
+            let (bridge_tx, bridge_rx) = mpsc::channel::<crate::keyboard::KeyCommand>();
+            std::thread::spawn(move || { while bridge_rx.recv().is_ok() {} });
+            let (sync_tx, sync_rx) = mpsc::sync_channel::<crate::keyboard::KeyCommand>(100_000);
+            let bt = bridge_tx;
+            std::thread::spawn(move || {
+                while let Ok(cmd) = sync_rx.recv() {
+                    if bt.send(cmd).is_err() { break; }
+                }
+            });
+            let mut guard = crate::keyboard::COMMAND_TX
+                .lock()
+                .unwrap_or_else(|e| e.into_inner());
+            *guard = Some(sync_tx);
         });
-        let bridge_tx = BRIDGE.get().unwrap();
-        let (sync_tx, sync_rx) = mpsc::sync_channel::<crate::keyboard::KeyCommand>(100_000);
-        let bt = bridge_tx.clone();
-        std::thread::spawn(move || {
-            while let Ok(cmd) = sync_rx.recv() {
-                if bt.send(cmd).is_err() { break; }
-            }
-        });
-        let mut guard = crate::keyboard::COMMAND_TX
-            .lock()
-            .unwrap_or_else(|e| e.into_inner());
-        *guard = Some(sync_tx);
     }
 
     fn test_router() -> Router {
@@ -455,10 +456,21 @@ mod e2e_tests {
     }
 
     fn recv_cmd(rx: &mpsc::Receiver<KeyCommand>) -> KeyCommand {
-        match rx.recv_timeout(CMD_TIMEOUT) {
-            Ok(c) => c,
-            Err(mpsc::RecvTimeoutError::Timeout) => panic!("no command"),
-            Err(mpsc::RecvTimeoutError::Disconnected) => panic!("disconnected"),
+        // Retry loop: the command may not be immediately available if
+        // the server thread hasn't scheduled the handler yet.
+        let deadline = std::time::Instant::now() + CMD_TIMEOUT;
+        loop {
+            match rx.recv_timeout(Duration::from_millis(100)) {
+                Ok(c) => return c,
+                Err(mpsc::RecvTimeoutError::Timeout) => {
+                    if std::time::Instant::now() > deadline {
+                        panic!("no command received within {CMD_TIMEOUT:?}");
+                    }
+                }
+                Err(mpsc::RecvTimeoutError::Disconnected) => {
+                    panic!("disconnected");
+                }
+            }
         }
     }
 
