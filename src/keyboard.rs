@@ -333,6 +333,13 @@ mod tests {
         assert_eq!(queue_enter(), CommandResult::Paused);
     }
 
+    #[test]
+    fn test_queue_select_all_returns_paused_when_disabled() {
+        let _guard = TestGuard::new();
+        set_enabled(false);
+        assert_eq!(queue_select_all(), CommandResult::Paused);
+    }
+
     // ── overlong text returns TooLong ──────────────────────────
 
     #[test]
