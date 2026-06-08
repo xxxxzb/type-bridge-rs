@@ -25,17 +25,19 @@ fn build_router() -> (Router, SocketIo) {
         socket.on(
             "type_text",
             |_: SocketRef, Data(payload): Data<TypeTextPayload>| async move {
-                crate::keyboard::queue_type_text(payload.text);
+                let _ = crate::keyboard::queue_type_text(payload.text);
             },
         );
         socket.on("backspace", |_: SocketRef, Data(()): Data<()>| async move {
-            crate::keyboard::queue_backspace();
+            let _ = crate::keyboard::queue_backspace();
         });
         socket.on(
             "press_key",
             |_: SocketRef, Data(payload): Data<PressKeyPayload>| async move {
                 match payload.key.as_str() {
-                    "enter" => crate::keyboard::queue_enter(),
+                    "enter" => {
+                        let _ = crate::keyboard::queue_enter();
+                    }
                     other => tracing::warn!("Unknown key requested: {other}"),
                 }
             },

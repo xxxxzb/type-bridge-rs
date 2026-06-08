@@ -23,3 +23,4 @@ softbuffer = "0.4"
 
 [dev-dependencies]
 tower = "0.5"
+serial_test = "3"

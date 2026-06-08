@@ -64,7 +64,7 @@ fn main() {
     let (shutdown_tx, shutdown_rx) = oneshot::channel::<()>();
     let shutdown_tx = std::cell::Cell::new(Some(shutdown_tx));
 
-    let (kb_tx, kb_rx) = mpsc::channel::<keyboard::KeyCommand>();
+    let (kb_tx, kb_rx) = mpsc::sync_channel::<keyboard::KeyCommand>(128);
     keyboard::init_command_queue(kb_tx);
 
     std::thread::spawn(move || {

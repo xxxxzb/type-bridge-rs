@@ -6,19 +6,29 @@ use std::time::Duration;
 
 static ENABLED: AtomicBool = AtomicBool::new(true);
 static ENIGO: OnceLock<Mutex<Enigo>> = OnceLock::new();
-static COMMAND_TX: OnceLock<Mutex<mpsc::Sender<KeyCommand>>> = OnceLock::new();
+static COMMAND_TX: Mutex<Option<mpsc::SyncSender<KeyCommand>>> = Mutex::new(None);
 
 pub enum KeyCommand {
     TypeText(String),
     Backspace,
     Enter,
+    SelectAll,
 }
 
-pub fn init_command_queue(tx: mpsc::Sender<KeyCommand>) {
-    COMMAND_TX
-        .set(Mutex::new(tx))
-        .map_err(|_| ())
-        .expect("keyboard command queue already initialized");
+#[derive(Debug, PartialEq, Eq)]
+pub enum CommandResult {
+    Queued,
+    Paused,
+    Full,
+    TooLong,
+}
+
+const MAX_TEXT_LEN: usize = 10_000;
+
+pub fn init_command_queue(tx: mpsc::SyncSender<KeyCommand>) {
+    *COMMAND_TX
+        .lock()
+        .unwrap_or_else(|e| e.into_inner()) = Some(tx);
 }
 
 fn enigo() -> std::sync::MutexGuard<'static, Enigo> {
@@ -40,31 +50,53 @@ pub fn is_enabled() -> bool {
 
 // ── Queue API (called from server thread) ──────────────────────────
 
-fn send_command(cmd: KeyCommand) {
-    if let Some(tx) = COMMAND_TX.get() {
-        let _ = tx.lock().unwrap().send(cmd);
+fn send_command(cmd: KeyCommand) -> CommandResult {
+    let guard = COMMAND_TX
+        .lock()
+        .unwrap_or_else(|e| e.into_inner());
+    match guard.as_ref() {
+        Some(tx) => match tx.try_send(cmd) {
+            Ok(_) => CommandResult::Queued,
+            Err(mpsc::TrySendError::Full(_)) => CommandResult::Full,
+            Err(mpsc::TrySendError::Disconnected(_)) => {
+                tracing::warn!("Command channel disconnected");
+                CommandResult::Full
+            }
+        },
+        None => CommandResult::Full,
     }
 }
 
-pub fn queue_type_text(text: String) {
-    if !is_enabled() || text.is_empty() {
-        return;
-    }
-    send_command(KeyCommand::TypeText(text));
-}
-
-pub fn queue_backspace() {
+pub fn queue_type_text(text: String) -> CommandResult {
     if !is_enabled() {
-        return;
+        return CommandResult::Paused;
     }
-    send_command(KeyCommand::Backspace);
+    if text.len() > MAX_TEXT_LEN {
+        tracing::warn!("TypeText too long ({} chars), max {MAX_TEXT_LEN}", text.len());
+        return CommandResult::TooLong;
+    }
+    send_command(KeyCommand::TypeText(text))
 }
 
-pub fn queue_enter() {
+pub fn queue_backspace() -> CommandResult {
     if !is_enabled() {
-        return;
+        return CommandResult::Paused;
     }
-    send_command(KeyCommand::Enter);
+    send_command(KeyCommand::Backspace)
+}
+
+pub fn queue_enter() -> CommandResult {
+    if !is_enabled() {
+        return CommandResult::Paused;
+    }
+    send_command(KeyCommand::Enter)
+}
+
+pub fn queue_select_all() -> CommandResult {
+    if !is_enabled() {
+        return CommandResult::Paused;
+    }
+    send_command(KeyCommand::SelectAll)
 }
 
 // ── Execute API (called from main thread event loop) ───────────────
@@ -74,6 +106,7 @@ pub fn execute(cmd: KeyCommand) {
         KeyCommand::TypeText(text) => execute_type_text(&text),
         KeyCommand::Backspace => execute_backspace(),
         KeyCommand::Enter => execute_enter(),
+        KeyCommand::SelectAll => tracing::warn!("SelectAll not yet implemented in execute"),
     }
 }
 
@@ -140,22 +173,26 @@ fn execute_enter() {
 #[cfg(test)]
 mod tests {
     use super::*;
+    use serial_test::serial;
 
     // ── enable/disable ─────────────────────────────────────────
 
     #[test]
+    #[serial]
     fn test_enabled_default() {
         ENABLED.store(true, Ordering::SeqCst);
         assert!(is_enabled());
     }
 
     #[test]
+    #[serial]
     fn test_set_enabled_false() {
         set_enabled(false);
         assert!(!is_enabled());
     }
 
     #[test]
+    #[serial]
     fn test_set_enabled_toggle() {
         set_enabled(true);
         assert!(is_enabled());
@@ -168,18 +205,21 @@ mod tests {
     // ── disabled returns Paused ─────────────────────────────────
 
     #[test]
+    #[serial]
     fn test_queue_type_text_returns_paused_when_disabled() {
         set_enabled(false);
         assert_eq!(queue_type_text("hello".into()), CommandResult::Paused);
     }
 
     #[test]
+    #[serial]
     fn test_queue_backspace_returns_paused_when_disabled() {
         set_enabled(false);
         assert_eq!(queue_backspace(), CommandResult::Paused);
     }
 
     #[test]
+    #[serial]
     fn test_queue_enter_returns_paused_when_disabled() {
         set_enabled(false);
         assert_eq!(queue_enter(), CommandResult::Paused);
@@ -188,6 +228,7 @@ mod tests {
     // ── overlong text returns TooLong ──────────────────────────
 
     #[test]
+    #[serial]
     fn test_queue_type_text_returns_too_long() {
         set_enabled(true);
         let long = "x".repeat(MAX_TEXT_LEN + 1);
@@ -197,11 +238,11 @@ mod tests {
     // ── full channel returns Full ──────────────────────────────
 
     #[test]
+    #[serial]
     fn test_queue_returns_full_when_channel_full() {
         set_enabled(true);
         let (test_tx, _test_rx) = mpsc::sync_channel::<KeyCommand>(1);
-        // Replace the global tx with a tiny capacity one
-        COMMAND_TX.set(Mutex::new(test_tx)).unwrap_or(());
+        *COMMAND_TX.lock().unwrap() = Some(test_tx);
         assert_eq!(queue_type_text("first".into()), CommandResult::Queued);
         assert_eq!(queue_type_text("second".into()), CommandResult::Full);
     }
@@ -209,10 +250,11 @@ mod tests {
     // ── queued on success ──────────────────────────────────────
 
     #[test]
+    #[serial]
     fn test_queue_type_text_returns_queued() {
         set_enabled(true);
         let (test_tx, _test_rx) = mpsc::sync_channel::<KeyCommand>(8);
-        COMMAND_TX.set(Mutex::new(test_tx)).unwrap_or(());
+        *COMMAND_TX.lock().unwrap() = Some(test_tx);
         assert_eq!(queue_type_text("hello".into()), CommandResult::Queued);
     }
 
@@ -235,6 +277,7 @@ mod tests {
                 KeyCommand::TypeText(t) => format!("text:{t}"),
                 KeyCommand::Backspace => "backspace".into(),
                 KeyCommand::Enter => "enter".into(),
+                KeyCommand::SelectAll => unreachable!(),
             })
             .collect();
 
