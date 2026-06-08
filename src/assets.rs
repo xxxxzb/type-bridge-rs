@@ -262,8 +262,8 @@ mod tests {
     }
 
     #[test]
-    fn test_html_contains_socket_io() {
-        assert!(HTML.contains("socket.io"));
+    fn test_html_has_no_socket_io_script() {
+        assert!(!HTML.contains("socket.io"));
     }
 
     #[test]
@@ -284,11 +284,6 @@ mod tests {
     #[test]
     fn test_html_contains_clear_button() {
         assert!(HTML.contains("clear"));
-    }
-
-    #[test]
-    fn test_html_contains_type_text_event() {
-        assert!(HTML.contains("type_text"));
     }
 
     #[test]
