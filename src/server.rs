@@ -299,6 +299,21 @@ mod tests {
     }
 
     #[tokio::test]
+    async fn test_api_commands_unauthorized_without_header() {
+        assert_eq!(test_router().oneshot(Request::builder().method("POST").uri("/api/commands").header("Content-Type", "application/json").body(Body::from(r#"{"type":"type_text","text":"hello"}"#)).unwrap()).await.unwrap().status(), 401);
+    }
+
+    #[tokio::test]
+    async fn test_api_commands_unauthorized_with_wrong_token() {
+        assert_eq!(test_router().oneshot(Request::builder().method("POST").uri("/api/commands").header("Authorization", "Bearer wrong").header("Content-Type", "application/json").body(Body::from(r#"{"type":"type_text","text":"hello"}"#)).unwrap()).await.unwrap().status(), 401);
+    }
+
+    #[tokio::test]
+    async fn test_api_history_unauthorized_with_wrong_token() {
+        assert_eq!(test_router().oneshot(Request::builder().uri("/api/history").header("Authorization", "Bearer wrong").body(Body::empty()).unwrap()).await.unwrap().status(), 401);
+    }
+
+    #[tokio::test]
     async fn test_api_status_returns_enabled() {
         let response = test_router().oneshot(Request::builder().uri("/api/status").header("Authorization", "Bearer abc123").body(Body::empty()).unwrap()).await.unwrap();
         assert_eq!(response.status(), 200);
@@ -547,6 +562,52 @@ mod e2e_tests {
         let (s, b) = http_get(port, "/api/history", Some(E2E_TOKEN)).await;
         assert_eq!(s, 200);
         assert!(b.contains("e2e-history-text"));
+        let _ = tx.send(());
+    }
+
+    #[tokio::test]
+    #[serial_test::serial]
+    async fn test_e2e_commands_full_queue_returns_429() {
+        let mut guard = keyboard::TestGuard::new();
+        crate::keyboard::set_enabled(true);
+        let (ttx, _trx) = mpsc::sync_channel::<KeyCommand>(1);
+        guard.replace_command_tx(ttx);
+        let (port, tx) = spawn_server(E2E_TOKEN.to_string());
+        wait_for_server(port, Duration::from_secs(3)).await;
+
+        // First POST fills the 1-capacity slot
+        let (s1, _) = http_post(port, "/api/commands", Some(E2E_TOKEN), "application/json", r#"{"type":"type_text","text":"fill"}"#).await;
+        assert_eq!(s1, 202);
+
+        // Second POST overflows — channel is full
+        let (s2, _) = http_post(port, "/api/commands", Some(E2E_TOKEN), "application/json", r#"{"type":"type_text","text":"overflow"}"#).await;
+        assert_eq!(s2, 429);
+
+        let _ = tx.send(());
+    }
+
+    #[tokio::test]
+    #[serial_test::serial]
+    async fn test_e2e_clear_pc_field_produces_select_all_and_backspace() {
+        let mut guard = keyboard::TestGuard::new();
+        crate::keyboard::set_enabled(true);
+        let (ttx, trx) = mpsc::sync_channel::<KeyCommand>(16);
+        guard.replace_command_tx(ttx);
+        let (port, tx) = spawn_server(E2E_TOKEN.to_string());
+        wait_for_server(port, Duration::from_secs(3)).await;
+
+        let (s, _) = http_post(port, "/api/commands", Some(E2E_TOKEN), "application/json", r#"{"type":"clear_pc_field"}"#).await;
+        assert_eq!(s, 202);
+
+        match recv_cmd(&trx) {
+            KeyCommand::SelectAll => {},
+            o => panic!("expected SelectAll, got {o:?}"),
+        }
+        match recv_cmd(&trx) {
+            KeyCommand::Backspace => {},
+            o => panic!("expected Backspace, got {o:?}"),
+        }
+
         let _ = tx.send(());
     }
 }
