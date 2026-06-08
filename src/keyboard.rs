@@ -9,7 +9,7 @@ const MAX_TEXT_LEN: usize = 10_000;
 
 static ENABLED: AtomicBool = AtomicBool::new(true);
 static ENIGO: OnceLock<Mutex<Enigo>> = OnceLock::new();
-static COMMAND_TX: std::sync::Mutex<Option<mpsc::SyncSender<KeyCommand>>> =
+pub(crate) static COMMAND_TX: std::sync::Mutex<Option<mpsc::SyncSender<KeyCommand>>> =
     std::sync::Mutex::new(None);
 
 #[derive(Debug)]
@@ -32,30 +32,6 @@ pub fn init_command_queue(tx: mpsc::SyncSender<KeyCommand>) {
     *COMMAND_TX.lock().unwrap_or_else(|e| e.into_inner()) = Some(tx);
 }
 
-/// Test-only: ensure COMMAND_TX has a live channel so handlers can send
-/// commands without hitting Full/Disconnected.  The receiver is kept alive
-/// by a leaked rx so the channel stays functional.  Always overwrites
-/// COMMAND_TX with the global test channel so unit tests don't hit None.
-#[cfg(test)]
-pub fn ensure_command_tx() {
-    use std::sync::OnceLock;
-    // GLOBAL_TX_SENDER is created once and its receiver is leaked so the
-    // send end stays valid forever.
-    static GLOBAL_TX: OnceLock<mpsc::SyncSender<KeyCommand>> = OnceLock::new();
-
-    let tx = GLOBAL_TX.get_or_init(|| {
-        let (tx, rx) = mpsc::sync_channel::<KeyCommand>(100_000);
-        // Leak the receiver — the OS will reclaim on process exit.
-        std::mem::forget(rx);
-        tx
-    });
-
-    // Always set COMMAND_TX to the global test sender.  This guarantees
-    // that unit-test handlers never hit an empty (None) COMMAND_TX even
-    // after an E2E test's TestGuard has restored the original (None) value.
-    let mut guard = COMMAND_TX.lock().unwrap_or_else(|e| e.into_inner());
-    *guard = Some(tx.clone());
-}
 
 /// Global test mutex — ensures only one `TestGuard` is alive at a time
 /// so parallel tests cannot race on `ENABLED` or `COMMAND_TX`.
