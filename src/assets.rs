@@ -160,13 +160,30 @@ pub const HTML: &str = r#"<!DOCTYPE html>
   .act.back:active  { background: rgba(247,106,180,.08); }
   .act.clear { color: var(--danger);  border-color: rgba(247,78,106,.2); }
   .act.clear:active { background: rgba(247,78,106,.08); }
+  .act.local { color: var(--text); border-color: var(--border); }
+  .act.local:active { background: rgba(255,255,255,.04); }
 
   .act.enter {
-    grid-column: span 2;
     color: var(--accent);
     border-color: rgba(124,106,247,.2);
   }
   .act.enter:active { background: rgba(124,106,247,.08); }
+
+  .history-box { }
+  .history-list { max-height: 200px; overflow-y: auto; padding: 4px 0; }
+  .history-item {
+    padding: 10px 14px;
+    cursor: pointer;
+    font-size: 13px;
+    border-bottom: 1px solid var(--border);
+    text-overflow: ellipsis;
+    overflow: hidden;
+    white-space: nowrap;
+  }
+  .history-item:last-child { border-bottom: none; }
+  .history-item:hover { background: rgba(255,255,255,.03); }
+
+  .hidden { display: none !important; }
 
   .toast {
     position: fixed;
@@ -211,6 +228,11 @@ pub const HTML: &str = r#"<!DOCTYPE html>
     send to PC
   </button>
 
+  <div class="box history-box hidden" id="history-box">
+    <div class="box-label">recent history</div>
+    <div class="history-list" id="history-list"></div>
+  </div>
+
   <div class="actions">
     <button class="act back" id="back-btn">
       <svg width="15" height="15" viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2" stroke-linecap="round" stroke-linejoin="round">
@@ -220,14 +242,21 @@ pub const HTML: &str = r#"<!DOCTYPE html>
       backspace
     </button>
 
-    <button class="act clear" id="clear-btn">
+    <button class="act local" id="clear-text-btn">
+      <svg width="15" height="15" viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2" stroke-linecap="round" stroke-linejoin="round">
+        <line x1="18" y1="6" x2="6" y2="18"/><line x1="6" y1="6" x2="18" y2="18"/>
+      </svg>
+      Clear text
+    </button>
+
+    <button class="act clear" id="clear-pc-btn">
       <svg width="15" height="15" viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2" stroke-linecap="round" stroke-linejoin="round">
         <polyline points="3 6 5 6 21 6"/>
         <path d="M19 6l-1 14H6L5 6"/>
         <path d="M10 11v6"/><path d="M14 11v6"/>
         <path d="M9 6V4h6v2"/>
       </svg>
-      clear
+      Clear PC field
     </button>
 
     <button class="act enter" id="enter-btn">
@@ -235,13 +264,160 @@ pub const HTML: &str = r#"<!DOCTYPE html>
         <polyline points="9 10 4 15 9 20"/>
         <path d="M20 4v7a4 4 0 0 1-4 4H4"/>
       </svg>
-      enter / new line on PC
+      enter
     </button>
   </div>
 
 </div>
 
 <div class="toast" id="toast"></div>
+<script>
+document.addEventListener('DOMContentLoaded', function() {
+  // ── DOM refs ──
+  var textarea = document.getElementById('input');
+  var sendBtn = document.getElementById('send-btn');
+  var backBtn = document.getElementById('back-btn');
+  var clearTextBtn = document.getElementById('clear-text-btn');
+  var clearPcBtn = document.getElementById('clear-pc-btn');
+  var enterBtn = document.getElementById('enter-btn');
+  var pill = document.getElementById('pill');
+  var pillText = document.getElementById('pill-text');
+  var toast = document.getElementById('toast');
+  var historyBox = document.getElementById('history-box');
+  var historyList = document.getElementById('history-list');
+
+  // ── Toast ──
+  function showToast(msg) {
+    toast.textContent = msg;
+    toast.classList.add('show');
+    setTimeout(function() { toast.classList.remove('show'); }, 2000);
+  }
+
+  // ── API helper (adds Bearer token and JSON content-type) ──
+  function api(path, options) {
+    options = options || {};
+    var headers = options.headers || {};
+    var t = sessionStorage.getItem('token');
+    if (t) { headers['Authorization'] = 'Bearer ' + t; }
+    if (options.body) { headers['Content-Type'] = 'application/json'; }
+    return fetch(path, { method: options.method, headers: headers, body: options.body });
+  }
+
+  // ── Token extraction ──
+  var params = new URLSearchParams(location.search);
+  var urlToken = params.get('token');
+  if (urlToken) {
+    sessionStorage.setItem('token', urlToken);
+    history.replaceState(null, '', '/');
+  } else if (!sessionStorage.getItem('token')) {
+    showToast('no auth token');
+  }
+
+  // ── Command queue (serial execution via Promise chain) ──
+  var queue = Promise.resolve();
+
+  function enqueue(body, successMsg) {
+    queue = queue.then(function() {
+      return api('/api/commands', {
+        method: 'POST',
+        body: JSON.stringify(body)
+      }).then(function(res) {
+        if (res.status === 202) {
+          showToast(successMsg || 'sent');
+          if (body.type === 'type_text') {
+            textarea.value = '';
+            loadHistory();
+          }
+          return res;
+        }
+        return res.json().then(function(data) {
+          showToast(data.error || 'command failed');
+        });
+      }).catch(function() {
+        showToast('connection error');
+      });
+    });
+    return queue;
+  }
+
+  // ── Send to PC ──
+  sendBtn.addEventListener('click', function() {
+    var text = textarea.value.trim();
+    if (!text) { showToast('no text to send'); return; }
+    enqueue({type: 'type_text', text: text});
+  });
+
+  // ── Backspace ──
+  backBtn.addEventListener('click', function() {
+    enqueue({type: 'backspace'}, 'backspace sent');
+  });
+
+  // ── Clear text (local only, no HTTP) ──
+  clearTextBtn.addEventListener('click', function() {
+    textarea.value = '';
+    textarea.focus();
+  });
+
+  // ── Clear PC field ──
+  clearPcBtn.addEventListener('click', function() {
+    enqueue({type: 'clear_pc_field'}, 'clear sent');
+  });
+
+  // ── Enter ──
+  enterBtn.addEventListener('click', function() {
+    enqueue({type: 'enter'}, 'enter sent');
+  });
+
+  // ── Keyboard: Enter = send, Shift+Enter = newline ──
+  textarea.addEventListener('keydown', function(e) {
+    if (e.key === 'Enter' && !e.shiftKey) {
+      e.preventDefault();
+      sendBtn.click();
+    }
+  });
+
+  // ── Status polling (every 5s) ──
+  function updateStatus() {
+    api('/api/status').then(function(res) { return res.json(); }).then(function(data) {
+      if (data.enabled) {
+        pill.classList.add('ok');
+        pillText.textContent = 'enabled';
+      } else {
+        pill.classList.remove('ok');
+        pillText.textContent = 'paused';
+      }
+    }).catch(function() {
+      pill.classList.remove('ok');
+      pillText.textContent = 'offline';
+    });
+  }
+  updateStatus();
+  setInterval(updateStatus, 5000);
+
+  // ── History (load on init and after each send) ──
+  function loadHistory() {
+    api('/api/history').then(function(res) { return res.json(); }).then(function(entries) {
+      historyList.innerHTML = '';
+      if (!entries || entries.length === 0) {
+        historyBox.classList.add('hidden');
+        return;
+      }
+      historyBox.classList.remove('hidden');
+      entries.forEach(function(text) {
+        var div = document.createElement('div');
+        div.className = 'history-item';
+        div.textContent = text;
+        div.addEventListener('click', function() {
+          textarea.value = text;
+          textarea.focus();
+        });
+        historyList.appendChild(div);
+      });
+    }).catch(function() {});
+  }
+  loadHistory();
+});
+</script>
 </body>
 </html>"#;
 
@@ -276,16 +452,67 @@ mod tests {
 
     #[test]
     fn test_html_contains_enter_button() {
-        assert!(HTML.contains("enter"));
-    }
-
-    #[test]
-    fn test_html_contains_clear_button() {
-        assert!(HTML.contains("clear"));
+        assert!(HTML.contains("id=\"enter-btn\""));
     }
 
     #[test]
     fn test_html_closes_properly() {
         assert!(HTML.ends_with("</html>"));
+    }
+
+    #[test]
+    fn test_html_contains_script_tag() {
+        assert!(HTML.contains("<script>"));
+    }
+
+    #[test]
+    fn test_html_contains_session_storage() {
+        assert!(HTML.contains("sessionStorage"));
+    }
+
+    #[test]
+    fn test_html_contains_fetch() {
+        assert!(HTML.contains("fetch("));
+    }
+
+    #[test]
+    fn test_html_contains_replace_state() {
+        assert!(HTML.contains("replaceState"));
+    }
+
+    #[test]
+    fn test_html_contains_clear_pc_field() {
+        assert!(HTML.contains("Clear PC field"));
+    }
+
+    #[test]
+    fn test_html_contains_authorization_header() {
+        assert!(HTML.contains("Authorization"));
+        assert!(HTML.contains("Bearer"));
+    }
+
+    #[test]
+    fn test_html_contains_promise_queue() {
+        assert!(HTML.contains(".then("));
+    }
+
+    #[test]
+    fn test_html_contains_setinterval() {
+        assert!(HTML.contains("setInterval"));
+    }
+
+    #[test]
+    fn test_html_contains_history_section() {
+        assert!(HTML.contains("history-box"));
+    }
+
+    #[test]
+    fn test_html_contains_clear_text_button() {
+        assert!(HTML.contains("Clear text"));
+    }
+
+    #[test]
+    fn test_html_contains_no_onclick() {
+        assert!(!HTML.contains("onclick="));
     }
 }
