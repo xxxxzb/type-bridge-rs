@@ -7,7 +7,7 @@
 
 ## Phases
 
-- [ ] **Phase 1: Backend Core** — Serve pure HTTP API with Bearer token auth, security headers, convergent AppState; remove Socket.IO
+- [x] **Phase 1: Backend Core** — Serve pure HTTP API with Bearer token auth, security headers, convergent AppState; remove Socket.IO
 - [ ] **Phase 2: Frontend Rewrite** — Rewrite phone UI with fetch + Promise queue, correct button semantics, Bearer token from sessionStorage, status polling and history from HTTP API
 - [ ] **Phase 3: Testing & Documentation** — Comprehensive test coverage and accurate docs for HTTP-only architecture
 
@@ -33,12 +33,12 @@
 
 ```
 Wave 1 (parallel):
-  [ ] 01-01-PLAN.md — AppState + main.rs wiring (RUST-02, RUST-07)
-  [ ] 01-02-PLAN.md — keyboard.rs CommandResult refactor (RUST-06)
-  [ ] 01-03-PLAN.md — Strip Socket.IO from assets.rs (FE-01, FE-02)
+  [x] 01-01-PLAN.md — AppState + main.rs wiring (RUST-02, RUST-07)
+  [x] 01-02-PLAN.md — keyboard.rs CommandResult refactor (RUST-06)
+  [x] 01-03-PLAN.md — Strip Socket.IO from assets.rs (FE-01, FE-02)
 
 Wave 2 (depends on W1):
-  [ ] 01-04-PLAN.md — server.rs HTTP-only rewrite + auth + routes + security headers (API-xx, AUTH-xx, SEC-xx, RUST-01/03)
+  [x] 01-04-PLAN.md — server.rs HTTP-only rewrite + auth + routes + security headers (API-xx, AUTH-xx, SEC-xx, RUST-01/03)
 ```
 
 ---
@@ -59,8 +59,13 @@ Wave 2 (depends on W1):
 4. "Clear PC field" is visually distinct (styled as remote/dangerous action); sends `clear_pc_field` command; executes as SelectAll + Backspace on the PC
 5. Status pill periodically polls `GET /api/status` and shows enabled/paused state; history list populates from `GET /api/history` response; all commands execute serially (Promise queue ensures no concurrent fetch races)
 
-**Plans:** TBD
-**UI hint:** yes
+**Plans:** 2 plans
+
+```
+Wave 1 (parallel):
+  [ ] 02-01-PLAN.md — Rust backend fixes: backspace plain key + CSP header (RUST-04, SEC-05)
+  [ ] 02-02-PLAN.md — Frontend HTML/JS rewrite: fetch, Promise queue, correct buttons, sessionStorage auth, status polling, history (FE-03 through FE-11)
+```
 
 ---
 
@@ -88,8 +93,8 @@ Wave 2 (depends on W1):
 
 | Phase | Plans Complete | Status | Completed |
 |-------|----------------|--------|-----------|
-| 1. Backend Core | 4 planned | Planning | - |
-| 2. Frontend Rewrite | 0/0 | Not started | - |
+| 1. Backend Core | 4/4 | Complete | 2026-06-08 |
+| 2. Frontend Rewrite | 2 planned | Planning | - |
 | 3. Testing & Documentation | 0/0 | Not started | - |
 
 ---
