@@ -43,11 +43,11 @@ fn build_router(state: &Arc<AppState>) -> Router {
         req: axum::http::Request<Body>,
         next: middleware::Next,
     ) -> Resp {
-        if req.uri().query().map_or(false, |q| q.contains("token=")) {
+        if req.uri().query().is_some_and(|q| q.contains("token=")) {
             return (StatusCode::UNAUTHORIZED, Json(serde_json::json!({"error": "unauthorized"}))).into_response();
         }
         let auth = req.headers().get("Authorization").and_then(|v| v.to_str().ok()).unwrap_or("");
-        if !auth.starts_with("Bearer ") || &auth[7..] != state.token {
+        if !auth.starts_with("Bearer ") || auth[7..] != state.token {
             return (StatusCode::UNAUTHORIZED, Json(serde_json::json!({"error": "unauthorized"}))).into_response();
         }
         next.run(req).await
