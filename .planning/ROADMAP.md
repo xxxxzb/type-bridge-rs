@@ -8,7 +8,7 @@
 ## Phases
 
 - [x] **Phase 1: Backend Core** — Serve pure HTTP API with Bearer token auth, security headers, convergent AppState; remove Socket.IO
-- [ ] **Phase 2: Frontend Rewrite** — Rewrite phone UI with fetch + Promise queue, correct button semantics, Bearer token from sessionStorage, status polling and history from HTTP API
+- [x] **Phase 2: Frontend Rewrite** — Rewrite phone UI with fetch + Promise queue, correct button semantics, Bearer token from sessionStorage, status polling and history from HTTP API
 - [ ] **Phase 3: Testing & Documentation** — Comprehensive test coverage and accurate docs for HTTP-only architecture
 
 ## Phase Details
@@ -63,8 +63,8 @@ Wave 2 (depends on W1):
 
 ```
 Wave 1 (parallel):
-  [ ] 02-01-PLAN.md — Rust backend fixes: backspace plain key + CSP header (RUST-04, SEC-05)
-  [ ] 02-02-PLAN.md — Frontend HTML/JS rewrite: fetch, Promise queue, correct buttons, sessionStorage auth, status polling, history (FE-03 through FE-11)
+  [x] 02-01-PLAN.md — Rust backend fixes: backspace plain key + CSP header (RUST-04, SEC-05)
+  [x] 02-02-PLAN.md — Frontend HTML/JS rewrite: fetch, Promise queue, correct buttons, sessionStorage auth, status polling, history (FE-03 through FE-11)
 ```
 
 ---
@@ -85,7 +85,13 @@ Wave 1 (parallel):
 4. Frontend HTML tests verify: no socket.io JS present, uses `fetch()` for all API calls, `sessionStorage` for token, `Authorization: Bearer` header, `history.replaceState()` token cleanup, Promise-based serial command queue
 5. README is updated: architecture diagram shows axum HTTP (no Socket.IO), button table distinguishes "Clear text" (local) vs "Clear PC field" (remote), "与 Python 原版区别" section removes WebSocket/Socket.IO references
 
-**Plans:** TBD
+**Plans:** 2 plans in 1 wave
+
+```
+Wave 1 (parallel — no file overlap):
+  [ ] 03-01-PLAN.md — Test coverage gap closure (keyboard.rs, server.rs, delete socket.io.min.js)
+  [ ] 03-02-PLAN.md — Documentation update (README.md)
+```
 
 ---
 
@@ -94,8 +100,8 @@ Wave 1 (parallel):
 | Phase | Plans Complete | Status | Completed |
 |-------|----------------|--------|-----------|
 | 1. Backend Core | 4/4 | Complete | 2026-06-08 |
-| 2. Frontend Rewrite | 2 planned | Planning | - |
-| 3. Testing & Documentation | 0/0 | Not started | - |
+| 2. Frontend Rewrite | 2/2 | Complete | 2026-06-08 |
+| 3. Testing & Documentation | 0/2 | Planning | - |
 
 ---
 
