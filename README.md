@@ -29,7 +29,7 @@
 ## 原理
 
 ```
-手机浏览器 ──WiFi──▶ TypeBridge (axum + Socket.IO) ──▶ enigo + arboard ──▶ PC 当前焦点应用
+手机浏览器 ──WiFi──▶ TypeBridge (axum HTTP + Bearer token) ──▶ enigo + arboard ──▶ PC 当前焦点应用
 ```
 
 1. 在电脑上运行 `type-bridge-rs`
@@ -57,14 +57,16 @@ cargo build --release
 
 | Crate | 用途 |
 |---|---|
-| `axum` | HTTP 服务器 |
-| `socketioxide` | Socket.IO WebSocket 实时通信 |
+| `axum` | HTTP 服务器 + 路由 |
 | `enigo` | 跨平台键盘模拟 |
 | `arboard` | 剪贴板读写（处理所有 Unicode） |
 | `tray-icon` | 系统托盘图标 |
 | `muda` | 托盘菜单 |
 | `clap` | 命令行参数 |
 | `tokio` | 异步运行时 |
+| `qrcode` | 二维码生成 |
+| `winit` + `softbuffer` | 二维码窗口渲染 |
+| `tower` | HTTP 中间件（dev-dependency，仅测试用） |
 
 ---
 
@@ -96,12 +98,13 @@ type-bridge-rs --version
 
 | 按钮 | 功能 |
 |---|---|
-| **Send to PC** | 把手机文本框里的所有内容粘贴到 PC 当前焦点窗口，然后清空手机文本框 |
-| **Backspace** | 删除 PC 当前光标前的一个词，不修改手机文本框 |
+| **Send to PC** | 把手机文本框里的所有内容发送到 PC，然后清空手机文本框 |
+| **Backspace** | 删除 PC 光标前的一个字符（普通 Backspace，不含修饰键） |
 | **Enter** | 发送回车键到 PC |
-| **Clear** | 清空 PC 当前焦点输入区域，不修改手机文本框 |
+| **Clear text** (本地) | 仅清空手机文本框，不发送任何 HTTP 请求 |
+| **Clear PC field** (远程) | 全选并删除 PC 当前输入区域的所有内容（危险操作，视觉上已区分） |
 
-**提示：** 在手机键盘上直接按 Enter 也会立即发送。Shift + Enter 可以本地换行而不发送。
+**提示：** 在手机文本框中使用 Enter 键输入换行符。点击下方的 **Enter** 按钮向 PC 发送回车键。
 
 ---
 
@@ -133,10 +136,12 @@ type-bridge-rs --version
 TypeBridge 是 [TypeBridge](https://github.com/Hacker-Shohan/TypeBridge) 的 Rust 重写版，主要改进：
 
 - **剪贴板恢复** — 粘贴后自动还原剪贴板原有内容
-- **异步 I/O** — tokio 驱动的 WebSocket，更低的资源占用
+- **异步 I/O** — tokio 驱动的 HTTP 服务器，更低的资源占用
 - **单文件二进制** — 编译后零依赖，复制即用
 - **结构化日志** — tracing 框架，便于排查问题
-- **优雅关闭** — 退出时服务端发送关闭帧
+- **优雅关闭** — 收到退出信号后平滑停止 HTTP 服务器
+- **纯 HTTP API** — 无状态请求/响应模型，比长连接协议更简单，更好的安全边界
+- **Bearer Token 鉴权** — 无 CSRF 风险
 
 ---
 
