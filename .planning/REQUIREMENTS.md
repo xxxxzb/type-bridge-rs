@@ -91,60 +91,60 @@ Requirements for moving from Socket.IO to HTTP API.
 
 | Requirement | Phase | Status |
 |-------------|-------|--------|
-| API-01 | Phase 1 | Pending |
-| API-02 | Phase 1 | Pending |
-| API-03 | Phase 1 | Pending |
-| API-04 | Phase 1 | Pending |
-| API-05 | Phase 1 | Pending |
-| AUTH-01 | Phase 1 | Pending |
-| AUTH-02 | Phase 1 | Pending |
-| AUTH-03 | Phase 2 | Pending |
-| AUTH-04 | Phase 2 | Pending |
-| AUTH-05 | Phase 1 | Pending |
-| AUTH-06 | Phase 1 | Pending |
-| AUTH-07 | Phase 1 | Pending |
-| SEC-01 | Phase 1 | Pending |
-| SEC-02 | Phase 1 | Pending |
-| SEC-03 | Phase 1 | Pending |
-| SEC-04 | Phase 1 | Pending |
-| SEC-05 | Phase 2 | Pending |
-| RUST-01 | Phase 1 | Pending |
-| RUST-02 | Phase 1 | Pending |
-| RUST-03 | Phase 1 | Pending |
-| RUST-04 | Phase 2 | Pending |
-| RUST-05 | Phase 2 | Pending |
-| RUST-06 | Phase 1 | Pending |
-| RUST-07 | Phase 1 | Pending |
-| FE-01 | Phase 1 | Pending |
-| FE-02 | Phase 1 | Pending |
-| FE-03 | Phase 2 | Pending |
-| FE-04 | Phase 2 | Pending |
-| FE-05 | Phase 2 | Pending |
-| FE-06 | Phase 2 | Pending |
-| FE-07 | Phase 2 | Pending |
-| FE-08 | Phase 2 | Pending |
-| FE-09 | Phase 2 | Pending |
-| FE-10 | Phase 2 | Pending |
-| FE-11 | Phase 2 | Pending |
-| TEST-01 | Phase 3 | Pending |
-| TEST-02 | Phase 3 | Pending |
-| TEST-03 | Phase 3 | Pending |
-| TEST-04 | Phase 3 | Pending |
-| TEST-05 | Phase 3 | Pending |
-| TEST-06 | Phase 3 | Pending |
-| TEST-07 | Phase 3 | Pending |
-| TEST-08 | Phase 3 | Pending |
-| TEST-09 | Phase 3 | Pending |
-| TEST-10 | Phase 3 | Pending |
-| DOC-01 | Phase 3 | Pending |
-| DOC-02 | Phase 3 | Pending |
-| DOC-03 | Phase 3 | Pending |
+| API-01 | Phase 1: Backend Core | Pending |
+| API-02 | Phase 1: Backend Core | Pending |
+| API-03 | Phase 1: Backend Core | Pending |
+| API-04 | Phase 1: Backend Core | Pending |
+| API-05 | Phase 1: Backend Core | Pending |
+| AUTH-01 | Phase 1: Backend Core | Pending |
+| AUTH-02 | Phase 1: Backend Core | Pending |
+| AUTH-03 | Phase 2: Frontend Rewrite | Pending |
+| AUTH-04 | Phase 2: Frontend Rewrite | Pending |
+| AUTH-05 | Phase 1: Backend Core | Pending |
+| AUTH-06 | Phase 1: Backend Core | Pending |
+| AUTH-07 | Phase 1: Backend Core | Pending |
+| SEC-01 | Phase 1: Backend Core | Pending |
+| SEC-02 | Phase 1: Backend Core | Pending |
+| SEC-03 | Phase 1: Backend Core | Pending |
+| SEC-04 | Phase 1: Backend Core | Pending |
+| SEC-05 | Phase 2: Frontend Rewrite | Pending |
+| RUST-01 | Phase 1: Backend Core | Pending |
+| RUST-02 | Phase 1: Backend Core | Pending |
+| RUST-03 | Phase 1: Backend Core | Pending |
+| RUST-04 | Phase 2: Frontend Rewrite | Pending |
+| RUST-05 | Phase 2: Frontend Rewrite | Pending |
+| RUST-06 | Phase 1: Backend Core | Pending |
+| RUST-07 | Phase 1: Backend Core | Pending |
+| FE-01 | Phase 1: Backend Core | Pending |
+| FE-02 | Phase 1: Backend Core | Pending |
+| FE-03 | Phase 2: Frontend Rewrite | Pending |
+| FE-04 | Phase 2: Frontend Rewrite | Pending |
+| FE-05 | Phase 2: Frontend Rewrite | Pending |
+| FE-06 | Phase 2: Frontend Rewrite | Pending |
+| FE-07 | Phase 2: Frontend Rewrite | Pending |
+| FE-08 | Phase 2: Frontend Rewrite | Pending |
+| FE-09 | Phase 2: Frontend Rewrite | Pending |
+| FE-10 | Phase 2: Frontend Rewrite | Pending |
+| FE-11 | Phase 2: Frontend Rewrite | Pending |
+| TEST-01 | Phase 3: Testing & Docs | Pending |
+| TEST-02 | Phase 3: Testing & Docs | Pending |
+| TEST-03 | Phase 3: Testing & Docs | Pending |
+| TEST-04 | Phase 3: Testing & Docs | Pending |
+| TEST-05 | Phase 3: Testing & Docs | Pending |
+| TEST-06 | Phase 3: Testing & Docs | Pending |
+| TEST-07 | Phase 3: Testing & Docs | Pending |
+| TEST-08 | Phase 3: Testing & Docs | Pending |
+| TEST-09 | Phase 3: Testing & Docs | Pending |
+| TEST-10 | Phase 3: Testing & Docs | Pending |
+| DOC-01 | Phase 3: Testing & Docs | Pending |
+| DOC-02 | Phase 3: Testing & Docs | Pending |
+| DOC-03 | Phase 3: Testing & Docs | Pending |
 
 **Coverage:**
-- v1 requirements: 47 total
-- Mapped to phases: 47
+- v1 requirements: 48 total
+- Mapped to phases: 48
 - Unmapped: 0 ✓
 
 ---
 *Requirements defined: 2026-06-08*
-*Last updated: 2026-06-08 after milestone v1.0 spec*
+*Last updated: 2026-06-08 after roadmap created*
