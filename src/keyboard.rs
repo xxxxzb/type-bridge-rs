@@ -4,21 +4,110 @@ use std::sync::atomic::{AtomicBool, Ordering};
 use std::sync::{mpsc, Mutex, OnceLock};
 use std::time::Duration;
 
+/// Maximum characters per single TypeText event.
+const MAX_TEXT_LEN: usize = 10_000;
+
 static ENABLED: AtomicBool = AtomicBool::new(true);
 static ENIGO: OnceLock<Mutex<Enigo>> = OnceLock::new();
-static COMMAND_TX: OnceLock<Mutex<mpsc::Sender<KeyCommand>>> = OnceLock::new();
+static COMMAND_TX: std::sync::Mutex<Option<mpsc::SyncSender<KeyCommand>>> =
+    std::sync::Mutex::new(None);
 
+#[derive(Debug)]
 pub enum KeyCommand {
     TypeText(String),
     Backspace,
     Enter,
+    SelectAll,
 }
 
-pub fn init_command_queue(tx: mpsc::Sender<KeyCommand>) {
-    COMMAND_TX
-        .set(Mutex::new(tx))
-        .map_err(|_| ())
-        .expect("keyboard command queue already initialized");
+#[derive(Debug, PartialEq, Eq)]
+pub enum CommandResult {
+    Queued,
+    Paused,
+    Full,
+    TooLong,
+}
+
+pub fn init_command_queue(tx: mpsc::SyncSender<KeyCommand>) {
+    *COMMAND_TX.lock().unwrap_or_else(|e| e.into_inner()) = Some(tx);
+}
+
+/// Test-only: ensure COMMAND_TX has a live channel so handlers can send
+/// commands without hitting Full/Disconnected.  The receiver is kept alive
+/// by a leaked rx so the channel stays functional.  Always overwrites
+/// COMMAND_TX with the global test channel so unit tests don't hit None.
+#[cfg(test)]
+pub fn ensure_command_tx() {
+    use std::sync::OnceLock;
+    // GLOBAL_TX_SENDER is created once and its receiver is leaked so the
+    // send end stays valid forever.
+    static GLOBAL_TX: OnceLock<mpsc::SyncSender<KeyCommand>> = OnceLock::new();
+
+    let tx = GLOBAL_TX.get_or_init(|| {
+        let (tx, rx) = mpsc::sync_channel::<KeyCommand>(100_000);
+        // Leak the receiver — the OS will reclaim on process exit.
+        std::mem::forget(rx);
+        tx
+    });
+
+    // Always set COMMAND_TX to the global test sender.  This guarantees
+    // that unit-test handlers never hit an empty (None) COMMAND_TX even
+    // after an E2E test's TestGuard has restored the original (None) value.
+    let mut guard = COMMAND_TX.lock().unwrap_or_else(|e| e.into_inner());
+    *guard = Some(tx.clone());
+}
+
+/// Global test mutex — ensures only one `TestGuard` is alive at a time
+/// so parallel tests cannot race on `ENABLED` or `COMMAND_TX`.
+#[cfg(test)]
+static TEST_STATE_LOCK: std::sync::Mutex<()> = std::sync::Mutex::new(());
+
+/// Test-only guard: saves global `ENABLED` and (optionally) `COMMAND_TX` on
+/// creation, restores both on drop — even after a panic.  Holding
+/// `TEST_STATE_LOCK` guarantees exclusive access, so parallel tests that use
+/// this guard are serialised with respect to the guarded globals.
+#[cfg(test)]
+pub struct TestGuard {
+    _lock: std::sync::MutexGuard<'static, ()>,
+    initial_enabled: bool,
+    initial_tx: Option<mpsc::SyncSender<KeyCommand>>,
+    replaced_tx: bool,
+}
+
+#[cfg(test)]
+impl TestGuard {
+    pub fn new() -> Self {
+        let lock = TEST_STATE_LOCK.lock().unwrap_or_else(|e| e.into_inner());
+        Self {
+            _lock: lock,
+            initial_enabled: ENABLED.load(Ordering::SeqCst),
+            initial_tx: None,
+            replaced_tx: false,
+        }
+    }
+
+    /// Swap the global `COMMAND_TX` so tests can observe queued commands
+    /// without hitting the real OS input path.  The original sender (if any)
+    /// is restored automatically when the guard goes out of scope.
+    pub fn replace_command_tx(&mut self, tx: mpsc::SyncSender<KeyCommand>) {
+        let mut lock = COMMAND_TX.lock().unwrap_or_else(|e| e.into_inner());
+        if !self.replaced_tx {
+            self.initial_tx = lock.take();
+            self.replaced_tx = true;
+        }
+        *lock = Some(tx);
+    }
+}
+
+#[cfg(test)]
+impl Drop for TestGuard {
+    fn drop(&mut self) {
+        ENABLED.store(self.initial_enabled, Ordering::SeqCst);
+        if self.replaced_tx {
+            let mut lock = COMMAND_TX.lock().unwrap_or_else(|e| e.into_inner());
+            *lock = self.initial_tx.take();
+        }
+    }
 }
 
 fn enigo() -> std::sync::MutexGuard<'static, Enigo> {
@@ -40,31 +129,80 @@ pub fn is_enabled() -> bool {
 
 // ── Queue API (called from server thread) ──────────────────────────
 
-fn send_command(cmd: KeyCommand) {
-    if let Some(tx) = COMMAND_TX.get() {
-        let _ = tx.lock().unwrap().send(cmd);
+fn send_command(cmd: KeyCommand) -> CommandResult {
+    let guard = COMMAND_TX
+        .lock()
+        .unwrap_or_else(|e| e.into_inner());
+    match guard.as_ref() {
+        Some(tx) => match tx.try_send(cmd) {
+            Ok(_) => CommandResult::Queued,
+            Err(mpsc::TrySendError::Full(_)) => CommandResult::Full,
+            Err(mpsc::TrySendError::Disconnected(_)) => {
+                tracing::warn!("Command channel disconnected");
+                CommandResult::Full
+            }
+        },
+        None => CommandResult::Full,
     }
 }
 
-pub fn queue_type_text(text: String) {
-    if !is_enabled() || text.is_empty() {
-        return;
-    }
-    send_command(KeyCommand::TypeText(text));
-}
-
-pub fn queue_backspace() {
+pub fn queue_type_text(text: String) -> CommandResult {
     if !is_enabled() {
-        return;
+        return CommandResult::Paused;
     }
-    send_command(KeyCommand::Backspace);
+    if text.is_empty() {
+        return CommandResult::Paused;
+    }
+    if text.len() > MAX_TEXT_LEN {
+        tracing::warn!(
+            "TypeText too long ({} chars), max {MAX_TEXT_LEN}, rejecting",
+            text.len()
+        );
+        return CommandResult::TooLong;
+    }
+    send_command(KeyCommand::TypeText(text))
 }
 
-pub fn queue_enter() {
+pub fn queue_backspace() -> CommandResult {
     if !is_enabled() {
-        return;
+        return CommandResult::Paused;
     }
-    send_command(KeyCommand::Enter);
+    send_command(KeyCommand::Backspace)
+}
+
+pub fn queue_enter() -> CommandResult {
+    if !is_enabled() {
+        return CommandResult::Paused;
+    }
+    send_command(KeyCommand::Enter)
+}
+
+pub fn queue_select_all() -> CommandResult {
+    if !is_enabled() {
+        return CommandResult::Paused;
+    }
+    send_command(KeyCommand::SelectAll)
+}
+
+// ── Merging: consecutive TypeText are joined before execution ──────
+
+/// Merge consecutive `TypeText` commands into one, respecting
+/// Backspace/Enter as unmergeable boundaries.
+pub fn merge_commands(cmds: Vec<KeyCommand>) -> Vec<KeyCommand> {
+    let mut out: Vec<KeyCommand> = Vec::with_capacity(cmds.len());
+    for cmd in cmds {
+        match cmd {
+            KeyCommand::TypeText(t) => {
+                if let Some(KeyCommand::TypeText(last)) = out.last_mut() {
+                    last.push_str(&t);
+                } else {
+                    out.push(KeyCommand::TypeText(t));
+                }
+            }
+            other => out.push(other), // Backspace, Enter, SelectAll — unmergeable
+        }
+    }
+    out
 }
 
 // ── Execute API (called from main thread event loop) ───────────────
@@ -74,6 +212,7 @@ pub fn execute(cmd: KeyCommand) {
         KeyCommand::TypeText(text) => execute_type_text(&text),
         KeyCommand::Backspace => execute_backspace(),
         KeyCommand::Enter => execute_enter(),
+        KeyCommand::SelectAll => execute_select_all(),
     }
 }
 
@@ -135,6 +274,25 @@ fn execute_enter() {
     }
 }
 
+fn execute_select_all() {
+    let mut enigo = enigo();
+
+    #[cfg(target_os = "macos")]
+    let mod_key = Key::Meta;
+    #[cfg(not(target_os = "macos"))]
+    let mod_key = Key::Control;
+
+    if let Err(e) = enigo.key(mod_key, Direction::Press) {
+        tracing::error!("SelectAll: failed to press modifier: {e}");
+    }
+    if let Err(e) = enigo.key(Key::Unicode('a'), Direction::Click) {
+        tracing::error!("SelectAll: failed to press 'a': {e}");
+    }
+    if let Err(e) = enigo.key(mod_key, Direction::Release) {
+        tracing::error!("SelectAll: failed to release modifier: {e}");
+    }
+}
+
 // ── Tests ──────────────────────────────────────────────────────────
 
 #[cfg(test)]
@@ -145,18 +303,21 @@ mod tests {
 
     #[test]
     fn test_enabled_default() {
+        let _guard = TestGuard::new();
         ENABLED.store(true, Ordering::SeqCst);
         assert!(is_enabled());
     }
 
     #[test]
     fn test_set_enabled_false() {
+        let _guard = TestGuard::new();
         set_enabled(false);
         assert!(!is_enabled());
     }
 
     #[test]
     fn test_set_enabled_toggle() {
+        let _guard = TestGuard::new();
         set_enabled(true);
         assert!(is_enabled());
         set_enabled(false);
@@ -165,74 +326,153 @@ mod tests {
         assert!(is_enabled());
     }
 
-    // ── disabled blocks queuing ─────────────────────────────────
+    // ── disabled returns Paused ─────────────────────────────────
 
     #[test]
-    fn test_queue_type_text_returns_when_disabled() {
+    fn test_queue_type_text_returns_paused_when_disabled() {
+        let _guard = TestGuard::new();
         set_enabled(false);
-        assert!(!is_enabled());
-        // queue_type_text / queue_backspace / queue_enter all check
-        // is_enabled() first and return early when false
+        assert_eq!(queue_type_text("hello".into()), CommandResult::Paused);
     }
 
     #[test]
-    fn test_queue_backspace_returns_when_disabled() {
+    fn test_queue_backspace_returns_paused_when_disabled() {
+        let _guard = TestGuard::new();
         set_enabled(false);
-        assert!(!is_enabled());
+        assert_eq!(queue_backspace(), CommandResult::Paused);
     }
 
     #[test]
-    fn test_queue_enter_returns_when_disabled() {
+    fn test_queue_enter_returns_paused_when_disabled() {
+        let _guard = TestGuard::new();
         set_enabled(false);
-        assert!(!is_enabled());
+        assert_eq!(queue_enter(), CommandResult::Paused);
+    }
+
+    // ── overlong text returns TooLong ──────────────────────────
+
+    #[test]
+    fn test_queue_type_text_returns_too_long() {
+        let _guard = TestGuard::new();
+        set_enabled(true);
+        let long = "x".repeat(MAX_TEXT_LEN + 1);
+        assert_eq!(queue_type_text(long), CommandResult::TooLong);
+    }
+
+    // ── full channel returns Full ──────────────────────────────
+
+    #[test]
+    fn test_queue_returns_full_when_channel_full() {
+        let _guard = TestGuard::new();
+        set_enabled(true);
+        let (test_tx, _test_rx) = mpsc::sync_channel::<KeyCommand>(1);
+        *COMMAND_TX.lock().unwrap() = Some(test_tx);
+        assert_eq!(queue_type_text("first".into()), CommandResult::Queued);
+        assert_eq!(queue_type_text("second".into()), CommandResult::Full);
+    }
+
+    // ── queued on success ──────────────────────────────────────
+
+    #[test]
+    fn test_queue_type_text_returns_queued() {
+        let _guard = TestGuard::new();
+        set_enabled(true);
+        let (test_tx, _test_rx) = mpsc::sync_channel::<KeyCommand>(8);
+        *COMMAND_TX.lock().unwrap() = Some(test_tx);
+        assert_eq!(queue_type_text("hello".into()), CommandResult::Queued);
+    }
+
+    // ── bounded channel backpressure (direct channel, no global) ──
+
+    #[test]
+    fn test_sync_channel_rejects_when_full() {
+        let (tx, rx) = mpsc::sync_channel::<KeyCommand>(2);
+
+        assert!(tx.send(KeyCommand::TypeText("a".into())).is_ok());
+        assert!(tx.send(KeyCommand::TypeText("b".into())).is_ok());
+        assert!(tx.try_send(KeyCommand::TypeText("c".into())).is_err());
+
+        let mut count = 0;
+        while rx.try_recv().is_ok() {
+            count += 1;
+        }
+        assert_eq!(count, 2);
+    }
+
+    // ── text merging ───────────────────────────────────────────
+
+    #[test]
+    fn test_merge_consecutive_text() {
+        let cmds = vec![
+            KeyCommand::TypeText("a".into()),
+            KeyCommand::TypeText("b".into()),
+        ];
+        let merged = merge_commands(cmds);
+        assert_eq!(merged.len(), 1);
+        match &merged[0] {
+            KeyCommand::TypeText(t) => assert_eq!(t, "ab"),
+            _ => panic!("expected TypeText"),
+        }
+    }
+
+    #[test]
+    fn test_merge_respects_enter_boundary() {
+        let cmds = vec![
+            KeyCommand::TypeText("a".into()),
+            KeyCommand::Enter,
+            KeyCommand::TypeText("b".into()),
+        ];
+        let merged = merge_commands(cmds);
+        assert_eq!(merged.len(), 3);
+        match &merged[0] {
+            KeyCommand::TypeText(t) => assert_eq!(t, "a"),
+            _ => panic!("expected TypeText a"),
+        }
+        match &merged[2] {
+            KeyCommand::TypeText(t) => assert_eq!(t, "b"),
+            _ => panic!("expected TypeText b"),
+        }
+    }
+
+    #[test]
+    fn test_merge_respects_backspace_boundary() {
+        let cmds = vec![
+            KeyCommand::TypeText("x".into()),
+            KeyCommand::Backspace,
+            KeyCommand::TypeText("y".into()),
+        ];
+        let merged = merge_commands(cmds);
+        assert_eq!(merged.len(), 3);
+    }
+
+    #[test]
+    fn test_merge_respects_select_all_boundary() {
+        let cmds = vec![
+            KeyCommand::TypeText("before".into()),
+            KeyCommand::SelectAll,
+            KeyCommand::TypeText("after".into()),
+        ];
+        let merged = merge_commands(cmds);
+        assert_eq!(merged.len(), 3);
+    }
+
+    #[test]
+    fn test_merge_empty_input() {
+        let merged = merge_commands(vec![]);
+        assert!(merged.is_empty());
+    }
+
+    #[test]
+    fn test_merge_single_command() {
+        let merged = merge_commands(vec![KeyCommand::TypeText("only".into())]);
+        assert_eq!(merged.len(), 1);
     }
 
     // ── command queue end-to-end ────────────────────────────────
 
     #[test]
-    fn test_command_queue_full_flow() {
-        set_enabled(true);
-        let (tx, rx) = mpsc::channel::<KeyCommand>();
-
-        tx.send(KeyCommand::TypeText("hello".into())).unwrap();
-        tx.send(KeyCommand::Backspace).unwrap();
-        tx.send(KeyCommand::Enter).unwrap();
-        tx.send(KeyCommand::TypeText("世界".into())).unwrap();
-        drop(tx);
-
-        let commands: Vec<String> = rx
-            .iter()
-            .map(|cmd| match cmd {
-                KeyCommand::TypeText(t) => format!("text:{t}"),
-                KeyCommand::Backspace => "backspace".into(),
-                KeyCommand::Enter => "enter".into(),
-            })
-            .collect();
-
-        assert_eq!(commands.len(), 4);
-        assert_eq!(commands[0], "text:hello");
-        assert_eq!(commands[1], "backspace");
-        assert_eq!(commands[2], "enter");
-        assert_eq!(commands[3], "text:世界");
-    }
-
-    #[test]
-    fn test_command_queue_empty_on_disabled() {
-        set_enabled(false);
-        let (tx, rx) = mpsc::channel::<KeyCommand>();
-
-        // Send commands while disabled — the queue_* API would not send them,
-        // but we're testing the channel isolation here
-        tx.send(KeyCommand::TypeText("should_not_send".into())).unwrap();
-        drop(tx);
-
-        let commands: Vec<_> = rx.iter().collect();
-        assert_eq!(commands.len(), 1); // channel has it, but queue_* wouldn't send
-    }
-
-    #[test]
     fn test_command_queue_preserves_unicode() {
-        let (tx, rx) = mpsc::channel::<KeyCommand>();
+        let (tx, rx) = mpsc::sync_channel::<KeyCommand>(8);
         tx.send(KeyCommand::TypeText("emoji 😀 🚀".into())).unwrap();
         drop(tx);
 
@@ -240,20 +480,6 @@ mod tests {
         assert_eq!(commands.len(), 1);
         match &commands[0] {
             KeyCommand::TypeText(t) => assert_eq!(t, "emoji 😀 🚀"),
-            _ => panic!("expected TypeText"),
-        }
-    }
-
-    #[test]
-    fn test_command_queue_empty_text() {
-        let (tx, rx) = mpsc::channel::<KeyCommand>();
-        tx.send(KeyCommand::TypeText(String::new())).unwrap();
-        drop(tx);
-
-        let commands: Vec<_> = rx.iter().collect();
-        assert_eq!(commands.len(), 1);
-        match &commands[0] {
-            KeyCommand::TypeText(t) => assert!(t.is_empty()),
             _ => panic!("expected TypeText"),
         }
     }

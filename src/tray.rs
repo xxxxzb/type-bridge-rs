@@ -1,4 +1,5 @@
 use muda::{Menu, MenuItem, PredefinedMenuItem};
+use std::sync::OnceLock;
 use tray_icon::Icon;
 use tray_icon::TrayIcon;
 use tray_icon::TrayIconBuilder;
@@ -7,19 +8,28 @@ pub struct TrayState {
     pub tray: TrayIcon,
     pub status_item: MenuItem,
     pub toggle_id: muda::MenuId,
+    pub show_qr_id: muda::MenuId,
     pub copy_url_id: muda::MenuId,
     pub quit_id: muda::MenuId,
 }
 
-pub fn make_icon(_active: bool) -> Icon {
-    Icon::from_rgba(crate::tray_icons::ICON_ON.to_vec(), 32, 32)
-        .expect("Failed to create tray icon from RGBA data")
+static ICON_OFF: OnceLock<[u8; 4096]> = OnceLock::new();
+
+pub fn make_icon(active: bool) -> Icon {
+    if active {
+        Icon::from_rgba(crate::tray_icons::ICON_ON.to_vec(), 32, 32)
+            .expect("Failed to create tray icon from RGBA data")
+    } else {
+        let off = ICON_OFF.get_or_init(crate::tray_icons::make_icon_off);
+        Icon::from_rgba(off.to_vec(), 32, 32)
+            .expect("Failed to create paused tray icon from RGBA data")
+    }
 }
 
-pub fn build_tray(ip: &str, port: u16) -> TrayState {
+pub fn build_tray(url: &str) -> TrayState {
     let menu = Menu::new();
 
-    let url_item = MenuItem::new(format!("http://{}:{}", ip, port), false, None);
+    let url_item = MenuItem::new(url, false, None);
     menu.append(&url_item)
         .unwrap_or_else(|e| tracing::error!("Failed to add URL item: {e}"));
 
@@ -28,6 +38,7 @@ pub fn build_tray(ip: &str, port: u16) -> TrayState {
 
     let status = MenuItem::new("Typing: ON", false, None);
     let toggle = MenuItem::new("Toggle Typing", true, None);
+    let show_qr = MenuItem::new("Show QR Code", true, None);
     let copy_url = MenuItem::new("Copy URL", true, None);
     let quit = MenuItem::new("Quit", true, None);
 
@@ -37,6 +48,8 @@ pub fn build_tray(ip: &str, port: u16) -> TrayState {
         .unwrap_or_else(|e| tracing::error!("Failed to add separator: {e}"));
     menu.append(&toggle)
         .unwrap_or_else(|e| tracing::error!("Failed to add Toggle: {e}"));
+    menu.append(&show_qr)
+        .unwrap_or_else(|e| tracing::error!("Failed to add Show QR: {e}"));
     menu.append(&copy_url)
         .unwrap_or_else(|e| tracing::error!("Failed to add Copy URL: {e}"));
     menu.append(&quit)
@@ -44,13 +57,14 @@ pub fn build_tray(ip: &str, port: u16) -> TrayState {
 
     let status_item = status.clone();
     let toggle_id = toggle.id().clone();
+    let show_qr_id = show_qr.id().clone();
     let copy_url_id = copy_url.id().clone();
     let quit_id = quit.id().clone();
 
     let tray = TrayIconBuilder::new()
         .with_menu(Box::new(menu))
         .with_icon(make_icon(true))
-        .with_tooltip(format!("TypeBridge — ON\nhttp://{}:{}", ip, port))
+        .with_tooltip(format!("TypeBridge — ON\n{url}"))
         .build()
         .expect("Failed to create system tray icon");
 
@@ -58,6 +72,7 @@ pub fn build_tray(ip: &str, port: u16) -> TrayState {
         tray,
         status_item,
         toggle_id,
+        show_qr_id,
         copy_url_id,
         quit_id,
     }
@@ -66,8 +81,9 @@ pub fn build_tray(ip: &str, port: u16) -> TrayState {
 #[cfg(test)]
 #[allow(clippy::needless_range_loop)]
 mod tests {
-    use qrcode::QrCode;
+    use super::make_icon;
     use qrcode::render::unicode;
+    use qrcode::QrCode;
 
     fn qr_lines(url: &str) -> Vec<String> {
         let code = QrCode::new(url).expect("Failed to generate QR code");
@@ -128,6 +144,27 @@ mod tests {
     }
 
     #[test]
+    fn test_make_icon_active_true() {
+        let icon = make_icon(true);
+        // Just verify we can create it without panicking
+        drop(icon);
+    }
+
+    #[test]
+    fn test_make_icon_active_false() {
+        let icon = make_icon(false);
+        drop(icon);
+    }
+
+    #[test]
+    fn test_make_icon_different_data() {
+        // ICON_ON and the generated ICON_OFF must differ (paused icon is dimmed)
+        let off = crate::tray_icons::make_icon_off();
+        assert_ne!(crate::tray_icons::ICON_ON.to_vec(), off.to_vec());
+        assert_eq!(crate::tray_icons::ICON_ON.len(), off.len());
+    }
+
+    #[test]
     fn test_qr_lines_count() {
         let lines = qr_lines("http://192.168.1.1:12345");
         assert!(lines.len() >= 12 && lines.len() <= 18);
@@ -172,13 +209,25 @@ mod tests {
         let lines = qr_lines("http://192.168.1.1:12345");
         let w = lines[0].chars().count();
         let third = w / 3;
-        let first = lines.iter().position(|l| l.contains('█') || l.contains('▀')).unwrap();
-        let last = lines.iter().rposition(|l| l.contains('█') || l.contains('▀')).unwrap();
+        let first = lines
+            .iter()
+            .position(|l| l.contains('█') || l.contains('▀'))
+            .unwrap();
+        let last = lines
+            .iter()
+            .rposition(|l| l.contains('█') || l.contains('▀'))
+            .unwrap();
         let row0: Vec<char> = lines[first].chars().collect();
         let row_last: Vec<char> = lines[last].chars().collect();
         assert!(row0[..third].iter().any(|&c| c != ' '), "top-left missing");
-        assert!(row0[2 * third..].iter().any(|&c| c != ' '), "top-right missing");
-        assert!(row_last[..third].iter().any(|&c| c != ' '), "bottom-left missing");
+        assert!(
+            row0[2 * third..].iter().any(|&c| c != ' '),
+            "top-right missing"
+        );
+        assert!(
+            row_last[..third].iter().any(|&c| c != ' '),
+            "bottom-left missing"
+        );
     }
 
     #[test]

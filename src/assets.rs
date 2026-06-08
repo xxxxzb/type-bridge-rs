@@ -4,10 +4,7 @@ pub const HTML: &str = r#"<!DOCTYPE html>
 <meta charset="UTF-8">
 <meta name="viewport" content="width=device-width, initial-scale=1.0, user-scalable=no">
 <title>TypeBridge</title>
-<script src="https://cdn.socket.io/4.7.5/socket.io.min.js"></script>
 <style>
-  @import url('https://fonts.googleapis.com/css2?family=DM+Mono:ital,wght@0,400;0,500;1,400&family=Syne:wght@800&display=swap');
-
   *, *::before, *::after { box-sizing: border-box; margin: 0; padding: 0; }
 
   :root {
@@ -26,7 +23,7 @@ pub const HTML: &str = r#"<!DOCTYPE html>
     height: 100%;
     background: var(--bg);
     color: var(--text);
-    font-family: 'DM Mono', monospace;
+    font-family: 'SF Mono', 'Fira Code', 'Cascadia Code', 'Consolas', 'Menlo', monospace;
   }
 
   body::before {
@@ -57,7 +54,7 @@ pub const HTML: &str = r#"<!DOCTYPE html>
     justify-content: space-between;
   }
   .logo {
-    font-family: 'Syne', sans-serif;
+    font-family: system-ui, -apple-system, sans-serif;
     font-size: 18px;
     background: linear-gradient(120deg, var(--accent), var(--accent2));
     -webkit-background-clip: text;
@@ -108,7 +105,7 @@ pub const HTML: &str = r#"<!DOCTYPE html>
     border: none;
     outline: none;
     resize: none;
-    font-family: 'DM Mono', monospace;
+    font-family: 'SF Mono', 'Fira Code', 'Cascadia Code', 'Consolas', 'Menlo', monospace;
     font-size: 16px;
     color: var(--text);
     line-height: 1.6;
@@ -123,7 +120,7 @@ pub const HTML: &str = r#"<!DOCTYPE html>
     border: none;
     background: linear-gradient(135deg, var(--accent), var(--accent2));
     color: #fff;
-    font-family: 'DM Mono', monospace;
+    font-family: 'SF Mono', 'Fira Code', 'Cascadia Code', 'Consolas', 'Menlo', monospace;
     font-size: 15px;
     font-weight: 500;
     cursor: pointer;
@@ -148,7 +145,7 @@ pub const HTML: &str = r#"<!DOCTYPE html>
     border: 1px solid var(--border);
     background: var(--surface);
     color: var(--text);
-    font-family: 'DM Mono', monospace;
+    font-family: 'SF Mono', 'Fira Code', 'Cascadia Code', 'Consolas', 'Menlo', monospace;
     font-size: 13px;
     cursor: pointer;
     display: flex;
@@ -245,71 +242,6 @@ pub const HTML: &str = r#"<!DOCTYPE html>
 </div>
 
 <div class="toast" id="toast"></div>
-
-<script>
-const socket   = io();
-const input    = document.getElementById('input');
-const sendBtn  = document.getElementById('send-btn');
-const backBtn  = document.getElementById('back-btn');
-const clearBtn = document.getElementById('clear-btn');
-const enterBtn = document.getElementById('enter-btn');
-const pill     = document.getElementById('pill');
-const pillText = document.getElementById('pill-text');
-const toast    = document.getElementById('toast');
-
-socket.on('connect', () => {
-  pill.classList.add('ok');
-  pillText.textContent = 'connected';
-});
-socket.on('disconnect', () => {
-  pill.classList.remove('ok');
-  pillText.textContent = 'disconnected';
-});
-
-let toastT;
-function showToast(msg) {
-  toast.textContent = msg;
-  toast.classList.add('show');
-  clearTimeout(toastT);
-  toastT = setTimeout(() => toast.classList.remove('show'), 1600);
-}
-
-function sendText() {
-  const text = input.value;
-  if (!text.trim()) return;
-  socket.emit('type_text', { text });
-  input.value = '';
-  showToast('sent!');
-}
-
-sendBtn.addEventListener('click', sendText);
-
-input.addEventListener('keydown', (e) => {
-  if (e.key === 'Enter' && !e.shiftKey) {
-    e.preventDefault();
-    sendText();
-  }
-});
-
-backBtn.addEventListener('click', () => {
-  const v = input.value;
-  if (v.length > 0) {
-    input.value = v.slice(0, -1);
-  }
-  socket.emit('backspace', {});
-  showToast('⌫');
-});
-
-clearBtn.addEventListener('click', () => {
-  input.value = '';
-  showToast('cleared');
-});
-
-enterBtn.addEventListener('click', () => {
-  socket.emit('press_key', { key: 'enter' });
-  showToast('↵ enter');
-});
-</script>
 </body>
 </html>"#;
 
@@ -328,8 +260,8 @@ mod tests {
     }
 
     #[test]
-    fn test_html_contains_socket_io() {
-        assert!(HTML.contains("socket.io"));
+    fn test_html_has_no_socket_io_script() {
+        assert!(!HTML.contains("socket.io"));
     }
 
     #[test]
@@ -350,11 +282,6 @@ mod tests {
     #[test]
     fn test_html_contains_clear_button() {
         assert!(HTML.contains("clear"));
-    }
-
-    #[test]
-    fn test_html_contains_type_text_event() {
-        assert!(HTML.contains("type_text"));
     }
 
     #[test]
