@@ -10,7 +10,8 @@ use std::cell::RefCell;
 use std::num::NonZeroU32;
 use std::rc::Rc;
 use std::sync::mpsc;
-use std::sync::Arc;
+use std::collections::VecDeque;
+use std::sync::{Arc, Mutex};
 use std::time::{Duration, Instant};
 use tokio::sync::oneshot;
 use tray_icon::menu::MenuEvent;
@@ -112,10 +113,14 @@ fn main() {
     let (kb_tx, kb_rx) = mpsc::sync_channel::<keyboard::KeyCommand>(KB_CHANNEL_BOUND);
     keyboard::init_command_queue(kb_tx);
 
-    let token_clone = token.clone();
+    let app_state = Arc::new(server::AppState {
+        token: token.clone(),
+        history: Arc::new(Mutex::new(VecDeque::with_capacity(30))),
+    });
+
     std::thread::spawn(move || {
         let rt = tokio::runtime::Runtime::new().expect("Failed to create tokio runtime");
-        rt.block_on(async { server::run(port, token_clone, shutdown_rx).await });
+        rt.block_on(async { server::run(port, app_state, shutdown_rx).await });
     });
 
     let mut event_loop_builder = EventLoopBuilder::<TrayEvent>::with_user_event();

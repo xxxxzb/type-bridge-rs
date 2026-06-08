@@ -203,8 +203,8 @@ fn urlencoding(s: &str) -> String {
     out
 }
 
-pub async fn run(port: u16, token: String, shutdown_rx: oneshot::Receiver<()>) {
-    let (app, _io) = build_router(&token);
+pub async fn run(port: u16, state: Arc<AppState>, shutdown_rx: oneshot::Receiver<()>) {
+    let (app, _io) = build_router(&state.token);
 
     let addr = std::net::SocketAddr::from(([0, 0, 0, 0], port));
     tracing::info!("Server listening on http://0.0.0.0:{}", port);
