@@ -246,19 +246,8 @@ fn execute_type_text(text: &str) {
 fn execute_backspace() {
     let mut enigo = enigo();
 
-    #[cfg(target_os = "macos")]
-    let mod_key = Key::Alt;
-    #[cfg(not(target_os = "macos"))]
-    let mod_key = Key::Control;
-
-    if let Err(e) = enigo.key(mod_key, Direction::Press) {
-        tracing::error!("Backspace: failed to press modifier: {e}");
-    }
     if let Err(e) = enigo.key(Key::Backspace, Direction::Click) {
         tracing::error!("Backspace keystroke failed: {e}");
-    }
-    if let Err(e) = enigo.key(mod_key, Direction::Release) {
-        tracing::error!("Backspace: failed to release modifier: {e}");
     }
 }
 
