@@ -1,15 +1,12 @@
-/// Static HTML page. The token is NOT injected server-side;
-/// JavaScript reads it from `location.search` and passes it to
-/// the Socket.IO handshake. The `/` route guards against missing
-/// or wrong tokens before serving this page.
 pub const HTML: &str = r#"<!DOCTYPE html>
 <html lang="en">
 <head>
 <meta charset="UTF-8">
 <meta name="viewport" content="width=device-width, initial-scale=1.0, user-scalable=no">
 <title>TypeBridge</title>
-<script src="/sio.min.js"></script>
 <style>
+  @import url('https://fonts.googleapis.com/css2?family=DM+Mono:ital,wght@0,400;0,500;1,400&family=Syne:wght@800&display=swap');
+
   *, *::before, *::after { box-sizing: border-box; margin: 0; padding: 0; }
 
   :root {
@@ -28,7 +25,7 @@ pub const HTML: &str = r#"<!DOCTYPE html>
     height: 100%;
     background: var(--bg);
     color: var(--text);
-    font-family: 'SF Mono', 'Fira Code', 'Cascadia Code', 'Consolas', 'Menlo', monospace;
+    font-family: 'DM Mono', monospace;
   }
 
   body::before {
@@ -59,9 +56,8 @@ pub const HTML: &str = r#"<!DOCTYPE html>
     justify-content: space-between;
   }
   .logo {
-    font-family: system-ui, -apple-system, sans-serif;
+    font-family: 'Syne', sans-serif;
     font-size: 18px;
-    font-weight: 800;
     background: linear-gradient(120deg, var(--accent), var(--accent2));
     -webkit-background-clip: text;
     -webkit-text-fill-color: transparent;
@@ -111,7 +107,7 @@ pub const HTML: &str = r#"<!DOCTYPE html>
     border: none;
     outline: none;
     resize: none;
-    font-family: 'SF Mono', 'Fira Code', 'Cascadia Code', 'Consolas', 'Menlo', monospace;
+    font-family: 'DM Mono', monospace;
     font-size: 16px;
     color: var(--text);
     line-height: 1.6;
@@ -126,7 +122,7 @@ pub const HTML: &str = r#"<!DOCTYPE html>
     border: none;
     background: linear-gradient(135deg, var(--accent), var(--accent2));
     color: #fff;
-    font-family: inherit;
+    font-family: 'DM Mono', monospace;
     font-size: 15px;
     font-weight: 500;
     cursor: pointer;
@@ -151,7 +147,7 @@ pub const HTML: &str = r#"<!DOCTYPE html>
     border: 1px solid var(--border);
     background: var(--surface);
     color: var(--text);
-    font-family: inherit;
+    font-family: 'DM Mono', monospace;
     font-size: 13px;
     cursor: pointer;
     display: flex;
@@ -173,45 +169,6 @@ pub const HTML: &str = r#"<!DOCTYPE html>
     border-color: rgba(124,106,247,.2);
   }
   .act.enter:active { background: rgba(124,106,247,.08); }
-
-  .hidden { display: none !important; }
-
-  /* ── history section ── */
-  .history-box { margin-top: 4px; }
-  .history-list {
-    display: flex;
-    flex-direction: column;
-    gap: 2px;
-    padding: 4px 8px 8px;
-  }
-  .history-item {
-    display: flex;
-    align-items: center;
-    gap: 8px;
-    padding: 10px 12px;
-    border-radius: 10px;
-    background: transparent;
-    border: 1px solid transparent;
-    font-size: 13px;
-    color: var(--text);
-    cursor: pointer;
-    white-space: nowrap;
-    overflow: hidden;
-    text-overflow: ellipsis;
-    transition: background .15s, border-color .15s;
-    -webkit-tap-highlight-color: transparent;
-    user-select: none;
-  }
-  .history-item::before {
-    content: '↩';
-    font-size: 11px;
-    color: var(--muted);
-    flex-shrink: 0;
-  }
-  .history-item:active {
-    background: rgba(124,106,247,.08);
-    border-color: rgba(124,106,247,.15);
-  }
 
   .toast {
     position: fixed;
@@ -284,110 +241,9 @@ pub const HTML: &str = r#"<!DOCTYPE html>
     </button>
   </div>
 
-  <div class="box history-box hidden" id="history-section">
-    <div class="box-label">recent</div>
-    <div class="history-list" id="history-list"></div>
-  </div>
-
 </div>
 
 <div class="toast" id="toast"></div>
-
-<script>
-// Read token from the page URL — the server already validated it before serving this page
-const params = new URLSearchParams(location.search);
-const token = params.get('token') || '';
-const socket = io("/", { query: { token: token } });
-const input    = document.getElementById('input');
-const sendBtn  = document.getElementById('send-btn');
-const backBtn  = document.getElementById('back-btn');
-const clearBtn = document.getElementById('clear-btn');
-const enterBtn = document.getElementById('enter-btn');
-const pill     = document.getElementById('pill');
-const pillText = document.getElementById('pill-text');
-const toast    = document.getElementById('toast');
-
-socket.on('connect', () => {
-  pill.classList.add('ok');
-  pillText.textContent = 'connected';
-});
-socket.on('disconnect', () => {
-  pill.classList.remove('ok');
-  pillText.textContent = 'disconnected';
-});
-
-let toastT;
-function showToast(msg) {
-  toast.textContent = msg;
-  toast.classList.add('show');
-  clearTimeout(toastT);
-  toastT = setTimeout(() => toast.classList.remove('show'), 1600);
-}
-
-function sendText() {
-  const text = input.value;
-  if (!text.trim()) return;
-  socket.emit('type_text', { text });
-  input.value = '';
-  showToast('sent!');
-}
-
-sendBtn.addEventListener('click', sendText);
-
-input.addEventListener('keydown', (e) => {
-  if (e.key === 'Enter' && !e.shiftKey) {
-    e.preventDefault();
-    sendText();
-  }
-});
-
-backBtn.addEventListener('click', () => {
-  socket.emit('backspace', null);
-  showToast('⌫');
-});
-
-clearBtn.addEventListener('click', () => {
-  socket.emit('clear_input', null);
-  showToast('cleared');
-});
-
-enterBtn.addEventListener('click', () => {
-  socket.emit('press_key', { key: 'enter' });
-  showToast('↵ enter');
-});
-
-// ── History ──
-const historySection = document.getElementById('history-section');
-const historyList   = document.getElementById('history-list');
-
-socket.on('history', (entries) => {
-  renderHistory(entries || []);
-});
-
-function renderHistory(entries) {
-  if (!entries || entries.length === 0) {
-    historySection.classList.add('hidden');
-    return;
-  }
-  historySection.classList.remove('hidden');
-  historyList.innerHTML = '';
-  for (const text of entries) {
-    const item = document.createElement('div');
-    item.className = 'history-item';
-    item.textContent = text.length > 100 ? text.slice(0, 100) + '…' : text;
-    item.dataset.text = text;
-    historyList.appendChild(item);
-  }
-}
-
-historyList.addEventListener('click', (e) => {
-  const item = e.target.closest('.history-item');
-  if (!item) return;
-  input.value = item.dataset.text;
-  input.focus();
-  window.scrollTo({ top: 0, behavior: 'smooth' });
-});
-</script>
 </body>
 </html>"#;
 
@@ -406,18 +262,8 @@ mod tests {
     }
 
     #[test]
-    fn test_html_does_not_contain_cdn_socket_io() {
-        assert!(!HTML.contains("https://cdn.socket.io"));
-    }
-
-    #[test]
-    fn test_html_does_not_contain_google_fonts() {
-        assert!(!HTML.contains("fonts.googleapis.com"));
-    }
-
-    #[test]
-    fn test_html_uses_local_socket_io() {
-        assert!(HTML.contains("/sio.min.js"));
+    fn test_html_has_no_socket_io_script() {
+        assert!(!HTML.contains("socket.io"));
     }
 
     #[test]
@@ -441,45 +287,7 @@ mod tests {
     }
 
     #[test]
-    fn test_html_contains_type_text_event() {
-        assert!(HTML.contains("type_text"));
-    }
-
-    #[test]
-    fn test_html_has_history_section() {
-        assert!(HTML.contains("id=\"history-section\""));
-    }
-
-    #[test]
-    fn test_html_has_history_event_handler() {
-        assert!(HTML.contains("socket.on('history'"));
-    }
-
-    #[test]
-    fn test_html_has_history_list() {
-        assert!(HTML.contains("id=\"history-list\""));
-    }
-
-    #[test]
-    fn test_html_history_uses_textcontent() {
-        assert!(HTML.contains("item.textContent"));
-    }
-
-    #[test]
     fn test_html_closes_properly() {
         assert!(HTML.ends_with("</html>"));
-    }
-
-    #[test]
-    fn test_html_reads_token_from_url() {
-        // JS must read token from location.search, NOT from server-injected value
-        assert!(HTML.contains("URLSearchParams(location.search)"));
-        assert!(!HTML.contains("test-token-123")); // no hardcoded test data
-    }
-
-    #[test]
-    fn test_html_does_not_contain_server_injected_token() {
-        // The HTML must be static — no token injected by server-side fn
-        assert!(!HTML.contains("__TOKEN__"));
     }
 }
