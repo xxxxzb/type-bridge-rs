@@ -29,7 +29,17 @@
 4. `POST /api/commands` accepts `type_text`, `enter`, `backspace`, `clear_pc_field` commands via JSON body; returns 202 on queue success, 400 for empty text, 409 when paused, 413 for text >10,000 chars, 429 when queue is full
 5. All HTTP responses include security headers: `Cache-Control: no-store`, `Referrer-Policy: no-referrer`, `X-Content-Type-Options: nosniff`, `Cross-Origin-Resource-Policy: same-origin`; no CORS headers (`Access-Control-*`) are served
 
-**Plans:** TBD
+**Plans:** 4 plans in 2 waves
+
+```
+Wave 1 (parallel):
+  [ ] 01-01-PLAN.md — AppState + main.rs wiring (RUST-02, RUST-07)
+  [ ] 01-02-PLAN.md — keyboard.rs CommandResult refactor (RUST-06)
+  [ ] 01-03-PLAN.md — Strip Socket.IO from assets.rs (FE-01, FE-02)
+
+Wave 2 (depends on W1):
+  [ ] 01-04-PLAN.md — server.rs HTTP-only rewrite + auth + routes + security headers (API-xx, AUTH-xx, SEC-xx, RUST-01/03)
+```
 
 ---
 
@@ -78,7 +88,7 @@
 
 | Phase | Plans Complete | Status | Completed |
 |-------|----------------|--------|-----------|
-| 1. Backend Core | 0/0 | Not started | - |
+| 1. Backend Core | 4 planned | Planning | - |
 | 2. Frontend Rewrite | 0/0 | Not started | - |
 | 3. Testing & Documentation | 0/0 | Not started | - |
 
