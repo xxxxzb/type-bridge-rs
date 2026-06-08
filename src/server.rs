@@ -65,6 +65,12 @@ fn build_router(state: &Arc<AppState>) -> Router {
         headers.insert("Referrer-Policy", HeaderValue::from_static("no-referrer"));
         headers.insert("X-Content-Type-Options", HeaderValue::from_static("nosniff"));
         headers.insert("Cross-Origin-Resource-Policy", HeaderValue::from_static("same-origin"));
+        headers.insert(
+            "Content-Security-Policy",
+            HeaderValue::from_static(
+                "default-src 'self'; script-src 'unsafe-inline'; connect-src 'self'; base-uri 'none'; frame-ancestors 'none'; form-action 'none'"
+            ),
+        );
         response
     }
 
@@ -360,6 +366,20 @@ mod tests {
         assert_eq!(res.headers().get("Referrer-Policy").unwrap(), "no-referrer");
         assert_eq!(res.headers().get("X-Content-Type-Options").unwrap(), "nosniff");
         assert_eq!(res.headers().get("Cross-Origin-Resource-Policy").unwrap(), "same-origin");
+    }
+
+    #[tokio::test]
+    async fn test_csp_header_present() {
+        let res = test_router()
+            .oneshot(Request::builder().uri("/").body(Body::empty()).unwrap())
+            .await
+            .unwrap();
+        let csp = res.headers().get("Content-Security-Policy").unwrap().to_str().unwrap();
+        assert!(csp.contains("default-src 'self'"));
+        assert!(csp.contains("script-src 'unsafe-inline'"));
+        assert!(csp.contains("base-uri 'none'"));
+        assert!(csp.contains("frame-ancestors 'none'"));
+        assert!(csp.contains("form-action 'none'"));
     }
 
     #[tokio::test]
