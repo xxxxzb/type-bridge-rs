@@ -11,6 +11,12 @@ use std::collections::VecDeque;
 use std::sync::{Arc, Mutex};
 use tokio::sync::oneshot;
 
+#[derive(Clone)]
+pub struct AppState {
+    pub token: String,
+    pub history: Arc<Mutex<VecDeque<String>>>,
+}
+
 static SOCKET_IO_JS: &str = include_str!("socket.io.min.js");
 
 #[derive(Deserialize)]
