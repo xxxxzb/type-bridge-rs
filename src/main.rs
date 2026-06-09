@@ -7,10 +7,11 @@ mod tray_icons;
 
 use clap::Parser;
 use std::cell::RefCell;
+use std::collections::VecDeque;
 use std::num::NonZeroU32;
 use std::rc::Rc;
+use std::sync::atomic::{AtomicBool, Ordering};
 use std::sync::mpsc;
-use std::collections::VecDeque;
 use std::sync::{Arc, Mutex};
 use std::time::{Duration, Instant};
 use tokio::sync::oneshot;
@@ -111,11 +112,13 @@ fn main() {
     let shutdown_tx = std::cell::Cell::new(Some(shutdown_tx));
 
     let (kb_tx, kb_rx) = mpsc::sync_channel::<keyboard::KeyCommand>(KB_CHANNEL_BOUND);
+    let enabled = Arc::new(AtomicBool::new(true));
 
     let app_state = Arc::new(server::AppState {
         token: token.clone(),
         history: Arc::new(Mutex::new(VecDeque::with_capacity(30))),
         command_tx: kb_tx,
+        enabled: enabled.clone(),
     });
 
     std::thread::spawn(move || {
@@ -199,9 +202,9 @@ fn main() {
                     last_click = Instant::now();
 
                     if id == toggle_id {
-                        let enabled = keyboard::is_enabled();
-                        keyboard::set_enabled(!enabled);
-                        let new_state = keyboard::is_enabled();
+                        let was_enabled = enabled.load(Ordering::SeqCst);
+                        enabled.store(!was_enabled, Ordering::SeqCst);
+                        let new_state = !was_enabled;
                         let status = if new_state { "ON" } else { "PAUSED" };
                         let state = tray_state.borrow_mut();
                         state

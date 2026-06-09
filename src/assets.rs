@@ -524,6 +524,9 @@ mod tests {
         // must send the raw variable, not a trimmed copy.
         let idx = HTML.find("enqueue({type: 'type_text', text:").unwrap();
         let snippet = &HTML[idx..idx + 80];
-        assert!(snippet.contains("text: text"), "must send raw text, got: {snippet}");
+        assert!(
+            snippet.contains("text: text"),
+            "must send raw text, got: {snippet}"
+        );
     }
 }

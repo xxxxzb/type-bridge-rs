@@ -1,10 +1,8 @@
 use arboard::Clipboard;
 use enigo::{Direction, Enigo, Key, Keyboard, Settings};
-use std::sync::atomic::{AtomicBool, Ordering};
 use std::sync::{Mutex, OnceLock};
 use std::time::Duration;
 
-static ENABLED: AtomicBool = AtomicBool::new(true);
 static ENIGO: OnceLock<Mutex<Enigo>> = OnceLock::new();
 
 #[derive(Debug)]
@@ -13,14 +11,6 @@ pub enum KeyCommand {
     Backspace,
     Enter,
     ClearPcField,
-}
-
-pub fn set_enabled(v: bool) {
-    ENABLED.store(v, Ordering::SeqCst);
-}
-
-pub fn is_enabled() -> bool {
-    ENABLED.load(Ordering::SeqCst)
 }
 
 fn enigo() -> std::sync::MutexGuard<'static, Enigo> {
@@ -151,34 +141,6 @@ fn execute_select_all() {
 mod tests {
     use super::*;
     use std::sync::mpsc;
-
-    // ── enable/disable ─────────────────────────────────────────
-
-    #[test]
-    fn test_enabled_default() {
-        ENABLED.store(true, Ordering::SeqCst);
-        assert!(is_enabled());
-    }
-
-    #[test]
-    #[serial_test::serial]
-    fn test_set_enabled_false() {
-        set_enabled(true);
-        set_enabled(false);
-        assert!(!is_enabled());
-        set_enabled(true);
-    }
-
-    #[test]
-    #[serial_test::serial]
-    fn test_set_enabled_toggle() {
-        set_enabled(true);
-        assert!(is_enabled());
-        set_enabled(false);
-        assert!(!is_enabled());
-        set_enabled(true);
-        assert!(is_enabled());
-    }
 
     // ── bounded channel backpressure ───────────────────────────
 
