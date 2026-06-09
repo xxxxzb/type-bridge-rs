@@ -141,7 +141,7 @@ TypeBridge 是 [TypeBridge](https://github.com/Hacker-Shohan/TypeBridge) 的 Rus
 - **结构化日志** — tracing 框架，便于排查问题
 - **优雅关闭** — 收到退出信号后平滑停止 HTTP 服务器
 - **纯 HTTP API** — 无状态请求/响应模型，比长连接协议更简单，更好的安全边界
-- **Bearer Token 鉴权** — 无 CSRF 风险
+- **Bearer Token 鉴权** — 不使用 cookie，降低 CSRF 攻击面
 
 ---
 

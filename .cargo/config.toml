@@ -1,8 +1,0 @@
-[env]
-# Workaround for intermittent E2E test isolation failure under
-# parallel test threads.  The global COMMAND_TX static is shared
-# across all tests but its sender is replaced per-test, causing
-# occasional "disconnected" panics when >1 thread runs E2E tests
-# concurrently.  Production code is unaffected — the sender is
-# initialised once and never replaced at runtime.
-RUST_TEST_THREADS = "1"

@@ -111,11 +111,11 @@ fn main() {
     let shutdown_tx = std::cell::Cell::new(Some(shutdown_tx));
 
     let (kb_tx, kb_rx) = mpsc::sync_channel::<keyboard::KeyCommand>(KB_CHANNEL_BOUND);
-    keyboard::init_command_queue(kb_tx);
 
     let app_state = Arc::new(server::AppState {
         token: token.clone(),
         history: Arc::new(Mutex::new(VecDeque::with_capacity(30))),
+        command_tx: kb_tx,
     });
 
     std::thread::spawn(move || {

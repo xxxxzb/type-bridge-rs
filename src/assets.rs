@@ -342,8 +342,8 @@ document.addEventListener('DOMContentLoaded', function() {
 
   // ── Send to PC ──
   sendBtn.addEventListener('click', function() {
-    var text = textarea.value.trim();
-    if (!text) { showToast('no text to send'); return; }
+    var text = textarea.value;
+    if (!text.trim()) { showToast('no text to send'); return; }
     enqueue({type: 'type_text', text: text});
   });
 
@@ -514,5 +514,16 @@ mod tests {
     #[test]
     fn test_html_contains_no_onclick() {
         assert!(!HTML.contains("onclick="));
+    }
+
+    #[test]
+    fn test_html_sends_raw_textarea_value_not_trimmed() {
+        // The send path must preserve leading/trailing whitespace:
+        // text = textarea.value (raw), trim only for emptiness check.
+        // After the trim guard, enqueue({type:'type_text', text:text})
+        // must send the raw variable, not a trimmed copy.
+        let idx = HTML.find("enqueue({type: 'type_text', text:").unwrap();
+        let snippet = &HTML[idx..idx + 80];
+        assert!(snippet.contains("text: text"), "must send raw text, got: {snippet}");
     }
 }

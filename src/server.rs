@@ -7,15 +7,21 @@ use axum::routing::{get, post};
 use axum::{Json, Router};
 use serde::Deserialize;
 use std::collections::VecDeque;
-use std::sync::{Arc, Mutex};
+use std::sync::{mpsc, Arc, Mutex};
 use tokio::sync::oneshot;
 
+use crate::keyboard::KeyCommand;
+
 type Resp = axum::response::Response<Body>;
+
+/// Maximum characters per single type_text payload.
+const MAX_TEXT_LEN: usize = 10_000;
 
 #[derive(Clone)]
 pub struct AppState {
     pub token: String,
     pub history: Arc<Mutex<VecDeque<String>>>,
+    pub command_tx: mpsc::SyncSender<KeyCommand>,
 }
 
 const HISTORY_MAX: usize = 30;
@@ -68,7 +74,7 @@ fn build_router(state: &Arc<AppState>) -> Router {
         headers.insert(
             "Content-Security-Policy",
             HeaderValue::from_static(
-                "default-src 'self'; script-src 'unsafe-inline'; connect-src 'self'; base-uri 'none'; frame-ancestors 'none'; form-action 'none'"
+                "default-src 'self'; script-src 'unsafe-inline'; style-src 'unsafe-inline'; connect-src 'self'; base-uri 'none'; frame-ancestors 'none'; form-action 'none'"
             ),
         );
         response
@@ -90,20 +96,22 @@ fn build_router(state: &Arc<AppState>) -> Router {
         Json(entries).into_response()
     }
 
+    fn try_send_one(tx: &mpsc::SyncSender<KeyCommand>, cmd: KeyCommand) -> Resp {
+        match tx.try_send(cmd) {
+            Ok(()) => (StatusCode::ACCEPTED, Json(serde_json::json!({"status": "queued"}))).into_response(),
+            Err(mpsc::TrySendError::Full(_)) => (StatusCode::TOO_MANY_REQUESTS, Json(serde_json::json!({"error": "queue full"}))).into_response(),
+            Err(mpsc::TrySendError::Disconnected(_)) => {
+                tracing::warn!("Command channel disconnected");
+                (StatusCode::TOO_MANY_REQUESTS, Json(serde_json::json!({"error": "queue full"}))).into_response()
+            }
+        }
+    }
+
     #[derive(Deserialize)]
     struct CommandPayload {
         #[serde(rename = "type")]
         cmd_type: String,
         text: Option<String>,
-    }
-
-    fn skc(result: crate::keyboard::CommandResult) -> Resp {
-        match result {
-            crate::keyboard::CommandResult::Queued => (StatusCode::ACCEPTED, Json(serde_json::json!({"status": "queued"}))).into_response(),
-            crate::keyboard::CommandResult::Paused => (StatusCode::CONFLICT, Json(serde_json::json!({"error": "paused"}))).into_response(),
-            crate::keyboard::CommandResult::Full => (StatusCode::TOO_MANY_REQUESTS, Json(serde_json::json!({"error": "queue full"}))).into_response(),
-            crate::keyboard::CommandResult::TooLong => (StatusCode::PAYLOAD_TOO_LARGE, Json(serde_json::json!({"error": "text too long"}))).into_response(),
-        }
     }
 
     fn bad_req(msg: &'static str) -> Resp {
@@ -123,24 +131,37 @@ fn build_router(state: &Arc<AppState>) -> Router {
                 if text.is_empty() {
                     return bad_req("empty text");
                 }
-                if text.len() > 10_000 {
+                if text.len() > MAX_TEXT_LEN {
                     return (StatusCode::PAYLOAD_TOO_LARGE, Json(serde_json::json!({"error": "text too long"}))).into_response();
                 }
-                let result = crate::keyboard::queue_type_text(text.clone());
-                if result == crate::keyboard::CommandResult::Queued {
-                    let mut guard = state.history.lock().unwrap();
-                    add_to_history(&mut guard, &text, HISTORY_MAX);
+                if !crate::keyboard::is_enabled() {
+                    return (StatusCode::CONFLICT, Json(serde_json::json!({"error": "paused"}))).into_response();
                 }
-                skc(result)
+                match state.command_tx.try_send(KeyCommand::TypeText(text.clone())) {
+                    Ok(()) => {
+                        let mut guard = state.history.lock().unwrap();
+                        add_to_history(&mut guard, &text, HISTORY_MAX);
+                        (StatusCode::ACCEPTED, Json(serde_json::json!({"status": "queued"}))).into_response()
+                    }
+                    Err(mpsc::TrySendError::Full(_)) => {
+                        (StatusCode::TOO_MANY_REQUESTS, Json(serde_json::json!({"error": "queue full"}))).into_response()
+                    }
+                    Err(mpsc::TrySendError::Disconnected(_)) => {
+                        (StatusCode::TOO_MANY_REQUESTS, Json(serde_json::json!({"error": "queue full"}))).into_response()
+                    }
+                }
             }
-            "enter" => skc(crate::keyboard::queue_enter()),
-            "backspace" => skc(crate::keyboard::queue_backspace()),
-            "clear_pc_field" => {
-                match crate::keyboard::queue_select_all() {
-                    crate::keyboard::CommandResult::Queued => {}
-                    other => return skc(other),
+            "enter" | "backspace" | "clear_pc_field" => {
+                if !crate::keyboard::is_enabled() {
+                    return (StatusCode::CONFLICT, Json(serde_json::json!({"error": "paused"}))).into_response();
                 }
-                skc(crate::keyboard::queue_backspace())
+                let cmd = match payload.cmd_type.as_str() {
+                    "enter" => KeyCommand::Enter,
+                    "backspace" => KeyCommand::Backspace,
+                    "clear_pc_field" => KeyCommand::ClearPcField,
+                    _ => unreachable!(),
+                };
+                try_send_one(&state.command_tx, cmd)
             }
             _ => bad_req("unknown command type"),
         }
@@ -194,34 +215,16 @@ mod tests {
 
     const TEST_TOKEN: &str = "abc123";
 
-    fn init_test_globals() {
-        use std::sync::OnceLock;
-        // Set up the bridge COMMAND_TX exactly once, under TestGuard
-        // so we don't race with E2E tests that replace COMMAND_TX.
-        static CHANNELS: OnceLock<()> = OnceLock::new();
-        CHANNELS.get_or_init(|| {
-            let _guard = crate::keyboard::TestGuard::new();
-            let (bridge_tx, bridge_rx) = mpsc::channel::<crate::keyboard::KeyCommand>();
-            std::thread::spawn(move || { while bridge_rx.recv().is_ok() {} });
-            let (sync_tx, sync_rx) = mpsc::sync_channel::<crate::keyboard::KeyCommand>(100_000);
-            let bt = bridge_tx;
-            std::thread::spawn(move || {
-                while let Ok(cmd) = sync_rx.recv() {
-                    if bt.send(cmd).is_err() { break; }
-                }
-            });
-            let mut guard = crate::keyboard::COMMAND_TX
-                .lock()
-                .unwrap_or_else(|e| e.into_inner());
-            *guard = Some(sync_tx);
-        });
-    }
-
     fn test_router() -> Router {
-        init_test_globals();
+        crate::keyboard::set_enabled(true);
+        // Keep the receiver alive so try_send succeeds.
+        let (tx, rx) = mpsc::sync_channel::<KeyCommand>(100);
+        // Spawn a thread to drain the channel so sends don't block.
+        std::thread::spawn(move || { while rx.recv().is_ok() {} });
         let state = Arc::new(AppState {
             token: TEST_TOKEN.to_string(),
             history: Arc::new(Mutex::new(VecDeque::new())),
+            command_tx: tx,
         });
         build_router(&state)
     }
@@ -317,25 +320,26 @@ mod tests {
     async fn test_api_status_returns_enabled() {
         let response = test_router().oneshot(Request::builder().uri("/api/status").header("Authorization", "Bearer abc123").body(Body::empty()).unwrap()).await.unwrap();
         assert_eq!(response.status(), 200);
-        let json: serde_json::Value = serde_json::from_str(&String::from_utf8(axum::body::to_bytes(response.into_body(), 1024 * 1024).await.unwrap().to_vec()).unwrap()).unwrap();
+        let body_bytes = axum::body::to_bytes(response.into_body(), 1024 * 1024).await.unwrap();
+        let body_str = std::str::from_utf8(&body_bytes).unwrap();
+        let json: serde_json::Value = serde_json::from_str(body_str).unwrap();
         assert!(json.get("enabled").is_some());
         assert_eq!(json["version"], "0.3.0");
     }
 
+    // ── command tests (use dummy channel, just check status codes) ──
+
     #[tokio::test]
-    #[serial_test::serial]
     async fn test_api_commands_type_text_returns_202() {
         assert_eq!(test_router().oneshot(Request::builder().method("POST").uri("/api/commands").header("Authorization", "Bearer abc123").header("Content-Type", "application/json").body(Body::from(r#"{"type":"type_text","text":"hello"}"#)).unwrap()).await.unwrap().status(), 202);
     }
 
     #[tokio::test]
-    #[serial_test::serial]
     async fn test_api_commands_returns_400_for_empty_text() {
         assert_eq!(test_router().oneshot(Request::builder().method("POST").uri("/api/commands").header("Authorization", "Bearer abc123").header("Content-Type", "application/json").body(Body::from(r#"{"type":"type_text","text":""}"#)).unwrap()).await.unwrap().status(), 400);
     }
 
     #[tokio::test]
-    #[serial_test::serial]
     async fn test_api_commands_returns_413_for_long_text() {
         assert_eq!(test_router().oneshot(Request::builder().method("POST").uri("/api/commands").header("Authorization", "Bearer abc123").header("Content-Type", "application/json").body(Body::from(serde_json::json!({"type":"type_text","text":"x".repeat(10_001)}).to_string())).unwrap()).await.unwrap().status(), 413);
     }
@@ -343,28 +347,25 @@ mod tests {
     #[tokio::test]
     #[serial_test::serial]
     async fn test_api_commands_returns_409_when_paused() {
-        let s = test_router().oneshot(Request::builder().method("POST").uri("/api/commands").header("Authorization", "Bearer abc123").header("Content-Type", "application/json").body(Body::from(r#"{"type":"type_text","text":"test"}"#)).unwrap()).await.unwrap().status();
-        if crate::keyboard::is_enabled() {
-            assert!(s == 202 || s == 409);
-        } else {
-            assert_eq!(s, 409);
-        }
+        // test_router() sets enabled=true; override after.
+        let router = test_router();
+        crate::keyboard::set_enabled(false);
+        let s = router.oneshot(Request::builder().method("POST").uri("/api/commands").header("Authorization", "Bearer abc123").header("Content-Type", "application/json").body(Body::from(r#"{"type":"type_text","text":"test"}"#)).unwrap()).await.unwrap().status();
+        crate::keyboard::set_enabled(true);
+        assert_eq!(s, 409);
     }
 
     #[tokio::test]
-    #[serial_test::serial]
     async fn test_api_commands_backspace_returns_202() {
         assert_eq!(test_router().oneshot(Request::builder().method("POST").uri("/api/commands").header("Authorization", "Bearer abc123").header("Content-Type", "application/json").body(Body::from(r#"{"type":"backspace"}"#)).unwrap()).await.unwrap().status(), 202);
     }
 
     #[tokio::test]
-    #[serial_test::serial]
     async fn test_api_commands_enter_returns_202() {
         assert_eq!(test_router().oneshot(Request::builder().method("POST").uri("/api/commands").header("Authorization", "Bearer abc123").header("Content-Type", "application/json").body(Body::from(r#"{"type":"enter"}"#)).unwrap()).await.unwrap().status(), 202);
     }
 
     #[tokio::test]
-    #[serial_test::serial]
     async fn test_api_commands_clear_pc_field_returns_202() {
         assert_eq!(test_router().oneshot(Request::builder().method("POST").uri("/api/commands").header("Authorization", "Bearer abc123").header("Content-Type", "application/json").body(Body::from(r#"{"type":"clear_pc_field"}"#)).unwrap()).await.unwrap().status(), 202);
     }
@@ -392,6 +393,7 @@ mod tests {
         let csp = res.headers().get("Content-Security-Policy").unwrap().to_str().unwrap();
         assert!(csp.contains("default-src 'self'"));
         assert!(csp.contains("script-src 'unsafe-inline'"));
+        assert!(csp.contains("style-src 'unsafe-inline'"));
         assert!(csp.contains("base-uri 'none'"));
         assert!(csp.contains("frame-ancestors 'none'"));
         assert!(csp.contains("form-action 'none'"));
@@ -428,12 +430,31 @@ mod tests {
     async fn test_404_on_unknown_route() {
         assert_eq!(test_router().oneshot(Request::builder().uri("/nonexistent").body(Body::empty()).unwrap()).await.unwrap().status(), 404);
     }
+
+    // ── Whitepace preservation test ─────────────────────────────
+
+    #[tokio::test]
+    async fn test_api_commands_preserves_leading_whitespace() {
+        crate::keyboard::set_enabled(true);
+        let (tx, rx) = mpsc::sync_channel::<KeyCommand>(8);
+        let state = Arc::new(AppState {
+            token: TEST_TOKEN.to_string(),
+            history: Arc::new(Mutex::new(VecDeque::new())),
+            command_tx: tx,
+        });
+        let app = build_router(&state);
+        let resp = app.oneshot(Request::builder().method("POST").uri("/api/commands").header("Authorization", "Bearer abc123").header("Content-Type", "application/json").body(Body::from(r#"{"type":"type_text","text":"  hello  "}"#)).unwrap()).await.unwrap();
+        assert_eq!(resp.status(), 202);
+        match rx.recv_timeout(std::time::Duration::from_secs(1)).unwrap() {
+            KeyCommand::TypeText(t) => assert_eq!(t, "  hello  "),
+            other => panic!("expected TypeText, got {other:?}"),
+        }
+    }
 }
 
 #[cfg(test)]
 mod e2e_tests {
     use super::*;
-    use crate::keyboard::{self, KeyCommand};
     use std::sync::mpsc;
     use std::time::Duration;
     use tokio::io::{AsyncReadExt, AsyncWriteExt};
@@ -442,7 +463,7 @@ mod e2e_tests {
     const E2E_TOKEN: &str = "e2e-test-token-42";
     const CMD_TIMEOUT: Duration = Duration::from_secs(2);
 
-    fn spawn_server(token: String) -> (u16, tokio::sync::oneshot::Sender<()>) {
+    fn spawn_server(token: String, command_tx: mpsc::SyncSender<KeyCommand>) -> (u16, tokio::sync::oneshot::Sender<()>) {
         let rt = tokio::runtime::Handle::current();
         let (shutdown_tx, shutdown_rx) = oneshot::channel();
         let listener = std::net::TcpListener::bind("127.0.0.1:0").expect("bind");
@@ -452,6 +473,7 @@ mod e2e_tests {
         let state = Arc::new(AppState {
             token: token.clone(),
             history: Arc::new(Mutex::new(VecDeque::new())),
+            command_tx,
         });
         let app = build_router(&state);
         rt.spawn(async move { crate::server::serve(listener, app, shutdown_rx).await; });
@@ -491,8 +513,6 @@ mod e2e_tests {
     }
 
     fn recv_cmd(rx: &mpsc::Receiver<KeyCommand>) -> KeyCommand {
-        // Retry loop: the command may not be immediately available if
-        // the server thread hasn't scheduled the handler yet.
         let deadline = std::time::Instant::now() + CMD_TIMEOUT;
         loop {
             match rx.recv_timeout(Duration::from_millis(100)) {
@@ -509,11 +529,17 @@ mod e2e_tests {
         }
     }
 
+    // ── E2E tests ───────────────────────────────────────────────
+
+    fn dummy_tx() -> mpsc::SyncSender<KeyCommand> {
+        let (tx, rx) = mpsc::sync_channel::<KeyCommand>(1);
+        std::thread::spawn(move || { while rx.recv().is_ok() {} });
+        tx
+    }
+
     #[tokio::test]
-    #[serial_test::serial]
     async fn test_e2e_auth_rejection() {
-        let _guard = crate::keyboard::TestGuard::new();
-        let (port, tx) = spawn_server(E2E_TOKEN.to_string());
+        let (port, tx) = spawn_server(E2E_TOKEN.to_string(), dummy_tx());
         wait_for_server(port, Duration::from_secs(3)).await;
         assert_eq!(http_get(port, "/api/status", None).await.0, 401);
         assert_eq!(http_get(port, "/api/status", Some("wrong")).await.0, 401);
@@ -522,13 +548,10 @@ mod e2e_tests {
     }
 
     #[tokio::test]
-    #[serial_test::serial]
     async fn test_e2e_command_flow() {
-        let mut g = keyboard::TestGuard::new();
         crate::keyboard::set_enabled(true);
         let (ttx, trx) = mpsc::sync_channel::<KeyCommand>(16);
-        g.replace_command_tx(ttx);
-        let (port, tx) = spawn_server(E2E_TOKEN.to_string());
+        let (port, tx) = spawn_server(E2E_TOKEN.to_string(), ttx);
         wait_for_server(port, Duration::from_secs(3)).await;
 
         assert_eq!(http_post(port, "/api/commands", Some(E2E_TOKEN), "application/json", r#"{"type":"type_text","text":"hello e2e"}"#).await.0, 202);
@@ -543,13 +566,10 @@ mod e2e_tests {
     }
 
     #[tokio::test]
-    #[serial_test::serial]
     async fn test_e2e_history_flow() {
-        let mut g = keyboard::TestGuard::new();
         crate::keyboard::set_enabled(true);
         let (ttx, trx) = mpsc::sync_channel::<KeyCommand>(16);
-        g.replace_command_tx(ttx);
-        let (port, tx) = spawn_server(E2E_TOKEN.to_string());
+        let (port, tx) = spawn_server(E2E_TOKEN.to_string(), ttx);
         wait_for_server(port, Duration::from_secs(3)).await;
 
         let (s, b) = http_get(port, "/api/history", Some(E2E_TOKEN)).await;
@@ -566,20 +586,15 @@ mod e2e_tests {
     }
 
     #[tokio::test]
-    #[serial_test::serial]
     async fn test_e2e_commands_full_queue_returns_429() {
-        let mut guard = keyboard::TestGuard::new();
         crate::keyboard::set_enabled(true);
         let (ttx, _trx) = mpsc::sync_channel::<KeyCommand>(1);
-        guard.replace_command_tx(ttx);
-        let (port, tx) = spawn_server(E2E_TOKEN.to_string());
+        let (port, tx) = spawn_server(E2E_TOKEN.to_string(), ttx);
         wait_for_server(port, Duration::from_secs(3)).await;
 
-        // First POST fills the 1-capacity slot
         let (s1, _) = http_post(port, "/api/commands", Some(E2E_TOKEN), "application/json", r#"{"type":"type_text","text":"fill"}"#).await;
         assert_eq!(s1, 202);
 
-        // Second POST overflows — channel is full
         let (s2, _) = http_post(port, "/api/commands", Some(E2E_TOKEN), "application/json", r#"{"type":"type_text","text":"overflow"}"#).await;
         assert_eq!(s2, 429);
 
@@ -587,25 +602,48 @@ mod e2e_tests {
     }
 
     #[tokio::test]
-    #[serial_test::serial]
-    async fn test_e2e_clear_pc_field_produces_select_all_and_backspace() {
-        let mut guard = keyboard::TestGuard::new();
+    async fn test_e2e_clear_pc_field_atomic() {
         crate::keyboard::set_enabled(true);
         let (ttx, trx) = mpsc::sync_channel::<KeyCommand>(16);
-        guard.replace_command_tx(ttx);
-        let (port, tx) = spawn_server(E2E_TOKEN.to_string());
+        let (port, tx) = spawn_server(E2E_TOKEN.to_string(), ttx);
         wait_for_server(port, Duration::from_secs(3)).await;
 
         let (s, _) = http_post(port, "/api/commands", Some(E2E_TOKEN), "application/json", r#"{"type":"clear_pc_field"}"#).await;
         assert_eq!(s, 202);
 
+        // clear_pc_field must be a single atomic ClearPcField command
         match recv_cmd(&trx) {
-            KeyCommand::SelectAll => {},
-            o => panic!("expected SelectAll, got {o:?}"),
+            KeyCommand::ClearPcField => {},
+            o => panic!("expected single ClearPcField, got {o:?}"),
         }
+
+        let _ = tx.send(());
+    }
+
+    #[tokio::test]
+    async fn test_e2e_clear_pc_field_not_partial_when_queue_near_full() {
+        crate::keyboard::set_enabled(true);
+        // Capacity 1: only one slot. clear_pc_field must be a single
+        // atomic command, not two separate operations.
+        let (ttx, trx) = mpsc::sync_channel::<KeyCommand>(1);
+        let (port, tx) = spawn_server(E2E_TOKEN.to_string(), ttx);
+        wait_for_server(port, Duration::from_secs(3)).await;
+
+        // First POST fills the single slot.
+        let (s, _) = http_post(port, "/api/commands", Some(E2E_TOKEN), "application/json", r#"{"type":"clear_pc_field"}"#).await;
+        assert_eq!(s, 202);
+
+        // Second POST without draining → queue full → 429.
+        // If clear_pc_field were two separate commands, the first
+        // would fill the slot and the second would overflow here,
+        // but the test name captures the intent: single command.
+        let (s2, _) = http_post(port, "/api/commands", Some(E2E_TOKEN), "application/json", r#"{"type":"type_text","text":"overflow"}"#).await;
+        assert_eq!(s2, 429);
+
+        // Drain and verify the queued command is a single ClearPcField.
         match recv_cmd(&trx) {
-            KeyCommand::Backspace => {},
-            o => panic!("expected Backspace, got {o:?}"),
+            KeyCommand::ClearPcField => {},
+            o => panic!("expected single ClearPcField, got {o:?}"),
         }
 
         let _ = tx.send(());
